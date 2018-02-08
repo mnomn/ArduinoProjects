@@ -12,3 +12,7 @@ A sketch for ESP8266 that sends a message to IFTTT WebHooks when a button is pre
 ### SonoffSuperSimple
 
 A sketch for the Sonoff wifi switch [SonoffSuperSimple](SonoffSuperSimple)
+
+### OhmOnline
+
+Measure voltage over some unknown resistors and send it to a URL. [OhmOnline]
