@@ -8,3 +8,7 @@ Psychadelic three color led strip controller [PsychadeLights](PsychadeLights)
 ### IFTTTButton
 
 A sketch for ESP8266 that sends a message to IFTTT WebHooks when a button is pressed [IFTTTButton](IFTTTButton)
+
+### SonoffSuperSimple
+
+A sketch for the Sonoff wifi switch [SonoffSuperSimple](SonoffSuperSimple)
