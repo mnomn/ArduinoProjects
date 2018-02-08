@@ -15,9 +15,9 @@ A sketch for the Sonoff wifi switch [SonoffSuperSimple](SonoffSuperSimple)
 
 ### OhmOnline
 
-Measure voltage over some unknown resistors and send it to a URL. [OhmOnline]
+Measure voltage over some unknown resistors and send it to a URL. [OhmOnline](OhmOnline)
 
 ### Solstickan
 
 A weather station with display showing indoor and outdoor weather.
-It will fit in a match box, for example if the [Solstickan] brand.
+It will fit in a match box, for example of the [Solstickan](Solstickan) brand.
