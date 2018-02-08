@@ -2,5 +2,5 @@
 
 Various arduino projects
 
-## PsychadeLights
-Psychadelic three color led strip controller
+### PsychadeLights
+Psychadelic three color led strip controller [PsychadeLights](PsychadeLights)
