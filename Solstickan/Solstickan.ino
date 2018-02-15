@@ -1,7 +1,7 @@
 /*
 
-  Based on HelloWorld.ino from 
-  
+  Based on HelloWorld.ino from
+
   "Hello World" version for U8x8 API
 
   Universal 8bit Graphics Library (https://github.com/olikraus/u8g2/)
@@ -9,56 +9,56 @@
   Copyright (c) 2016, olikraus@gmail.com
   All rights reserved.
 
-  Redistribution and use in source and binary forms, with or without modification, 
+  Redistribution and use in source and binary forms, with or without modification,
   are permitted provided that the following conditions are met:
 
-  * Redistributions of source code must retain the above copyright notice, this list 
+  * Redistributions of source code must retain the above copyright notice, this list
     of conditions and the following disclaimer.
-    
-  * Redistributions in binary form must reproduce the above copyright notice, this 
-    list of conditions and the following disclaimer in the documentation and/or other 
+
+  * Redistributions in binary form must reproduce the above copyright notice, this
+    list of conditions and the following disclaimer in the documentation and/or other
     materials provided with the distribution.
 
-  THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND 
-  CONTRIBUTORS "AS IS" AND ANY EXPRESS OR IMPLIED WARRANTIES, 
-  INCLUDING, BUT NOT LIMITED TO, THE IMPLIED WARRANTIES OF 
-  MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE ARE 
-  DISCLAIMED. IN NO EVENT SHALL THE COPYRIGHT HOLDER OR 
-  CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL, 
-  SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING, BUT 
-  NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; 
-  LOSS OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER 
-  CAUSED AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, 
-  STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) 
-  ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF 
-  ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.  
+  THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND
+  CONTRIBUTORS "AS IS" AND ANY EXPRESS OR IMPLIED WARRANTIES,
+  INCLUDING, BUT NOT LIMITED TO, THE IMPLIED WARRANTIES OF
+  MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE ARE
+  DISCLAIMED. IN NO EVENT SHALL THE COPYRIGHT HOLDER OR
+  CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL,
+  SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING, BUT
+  NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES;
+  LOSS OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER
+  CAUSED AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT,
+  STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE)
+  ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF
+  ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
 */
 
 #include <Arduino.h>
 #include <ESPWebConfig.h> // github.com/mnomn/ESPWebConfig
+#include <ESPXtra.h> // https://github.com/mnomn/ESPXtra
 #include <U8g2lib.h>
 //#include <U8x8lib.h>
-#include <MQTTClient.h>
+#include <MQTTClient.h> // MQTT by Joel G in lib manager or https://github.com/256dpi/arduino-mqtt
 #include <ESP8266WiFi.h>
 // #include <Adafruit_BME280.h>
-#include <Adafruit_BMP280.h>
-
-#include "local_secret.h"
+#include <Adafruit_BMP280.h> // Also install Adafruit Unified Sensor
 
 
-const char* MURL = "url|MQTT broker";
-const char* MPORT = "MQTT number";
-const char* MUSER = "MQTT number";
-const char* MPASS = "MQTT number";
+const char* MURL = "Broker*";
+const char* MPORT = "number|Port";
+const char* MUSER = "User";
+const char* MPASS = "Pass";
 const char* TTOPIC = "Temp topic";
 const char* HTOPIC = "Humid topic";
 
-String parameters[] = {MURL, MPORT, MPASS, MUSER, TTOPIC, TTOPIC};
+String parameters[] = {MURL, MPORT, MUSER, MPASS, TTOPIC, HTOPIC};
 
 WiFiClient net;
-MQTTClient client;
-ESPWebConfig espConfig(NULL, parameters, 4);
+MQTTClient mqttClient;
+ESPWebConfig espConfig(NULL, parameters, 6);
+ESPXtra espXtra;
 
 #ifdef U8X8_HAVE_HW_SPI
 #include <SPI.h>
@@ -91,9 +91,21 @@ unsigned long nextRefresh = 0;
 
 Adafruit_BMP280 bm; // I2C
 
+char *topicT;
+char *topicH;
+char *mqttUser;
+char *mqttPass;
+
+byte displayNumber = 0;
+int configMode = 0;
+int contrast = 0;
+
 void setup(void)
 {
-  Serial.begin(74880);
+//   Serial.begin(74880);
+  u8g2.setDisplayRotation(U8G2_R0);
+  PrintSendStartScreen();
+  Serial.begin(9600);
   while(!Serial);
   Serial.println("");
   delay(10);
@@ -101,14 +113,31 @@ void setup(void)
 
   // Display
   u8g2.begin();
-  // u8x8.begin();
-  // u8x8.setPowerSave(0);
-  
-  WiFi.begin(WIFISSID, WIFIPWD);
-  client.begin(MQTTBROKER, net);
-  client.onMessage(messageReceived);
+  u8g2.setContrast(contrast);
 
-  espConfig.setup();
+  espConfig.setHelpText("MQTT:");
+  int res = espConfig.setup();
+  displayNumber = espConfig.getRaw(511);
+  Serial.print("Wifi connected ");
+  Serial.print(res);
+  Serial.print(", disp ");
+  Serial.println(displayNumber);
+
+  char *broker = espConfig.getParameter(MURL);
+  mqttUser = espConfig.getParameter(MUSER);
+  mqttPass = espConfig.getParameter(MPASS);
+  topicT = espConfig.getParameter(TTOPIC);
+  topicH = espConfig.getParameter(HTOPIC);
+
+  char *port = espConfig.getParameter(MPORT);
+  if (strlen(port) > 1) {
+    mqttClient.begin(broker, atoi(port), net);
+  }
+  else {
+    mqttClient.begin(broker, net);
+  }
+
+  mqttClient.onMessage(messageReceived);
 
   mqttConnect();
 
@@ -126,57 +155,91 @@ void setup(void)
 
 void loop(void)
 {
-  client.loop();
+  mqttClient.loop();
   delay(10);
+  unsigned long now = millis();
 
-  if (!client.connected()) {
-    mqttConnect();
+  if (configMode) {
+    digitalWrite(LED_BUILTIN, (now/1000)%2 == 0?HIGH:LOW);
+    exit;
   }
 
-  unsigned long now = millis();
-  if (now > nextRefresh) {
-    char kladd[8];
-    nextRefresh = nextRefresh + 5000; // 5 sec later
+  int pressed = espXtra.ButtonPressed(0);
+  if (pressed > 5) {
+    if (!configMode) {
+      espConfig.clearConfig();
+    }
+    configMode = 1;
+  } else if (pressed > 0) {
+    displayNumber = (displayNumber+1)%2;
+    espConfig.setRaw(511, displayNumber);
+    Serial.print("Display ");
+    Serial.println(displayNumber);
 
+    nextRefresh = now;
+    delay(500);
+  }
+
+  if (now >= nextRefresh) {
+    nextRefresh = nextRefresh + 5000; // 5 sec later
     readIndoors();
 
-    u8g2.setContrast(now%256);
     u8g2.clearBuffer();
-    PrintLayout1();
-    sprintf(kladd, "%lu", now%256);
-    u8g2.drawStr(40, 32, kladd);
+    if (displayNumber == 0) {
+      PrintLayout0();
+    } else {
+      PrintLayout1();
+    }
     u8g2.sendBuffer();
   }
+
+  if (!mqttClient.connected()) {
+    mqttConnect();
+  }
+}
+
+void PrintSendStartScreen() {
+  u8g2.setFont(u8g2_font_fub17_tf);
+  u8g2.drawStr(2,22,"Solstickan");
+  u8g2.sendBuffer();
+}
+
+void PrintLayout0() {
+    u8g2.setFont(u8g2_font_fub17_tf);
+    u8g2.drawStr(0,19,temp);
+    unsigned int width1 = u8g2.getStrWidth(temp);
+
+    int col2 = width1 + 13;
+
+    u8g2.drawStr(col2, 19,tin);
+    unsigned int width2 = u8g2.getStrWidth(tin);
+
+    u8g2.setFont(u8g2_font_fub11_tf);
+//    u8g2.setFont(u8g2_font_helvB08_tf);
+    u8g2.drawStr(col2 + width2 + 3, 13, "C");
+
+    // u8g2.setFont(u8g2_font_fur11_tf);
+    u8g2.setFont(u8g2_font_helvB08_tf);
+    u8g2.drawStr(0, 30, hum);
+    u8g2.drawStr(col2, 30, preas);
+
 }
 
 void PrintLayout1() {
-    u8g2.setFont(u8g2_font_fub17_tf);
-    u8g2.drawStr(0,19,temp);
+//    u8g2.setFont(u8g2_font_fub25_tf);
+    u8g2.setFont(u8g2_font_helvB24_tf);
+    u8g2.drawStr(0,30,temp);
     unsigned int width1 = u8g2.getStrWidth(temp);
-
-    u8g2.drawStr(width1 + 9, 19,tin);
-    unsigned int width2 = u8g2.getStrWidth(tin);
-
     u8g2.setFont(u8g2_font_fub11_tf);
-    u8g2.drawStr(width1 + 9 + width2 + 3, 13, "C");
+    u8g2.drawStr(width1 + 4, 15, "C");
 
-    u8g2.setFont(u8g2_font_fur11_tf);
-    u8g2.drawStr(0, 32, hum);
-}
-
-void PrintLayout2() {
-    u8g2.setFont(u8g2_font_fub17_tf);
-    u8g2.drawStr(0,19,temp);
-    unsigned int width1 = u8g2.getStrWidth(temp);
-
-    u8g2.drawStr(width1 + 9, 19,tin);
-    unsigned int width2 = u8g2.getStrWidth(tin);
-
-    u8g2.setFont(u8g2_font_fub11_tf);
-    u8g2.drawStr(width1 + 9 + width2 + 3, 13, "C");
-
-    u8g2.setFont(u8g2_font_fur11_tf);
-    u8g2.drawStr(0, 32, hum);
+//    u8g2.setFont(u8g2_font_courB08_tf);
+    u8g2.setFont(u8g2_font_helvB08_tf);
+    int col2 = 90;
+    int col3 = 100;
+    u8g2.drawStr(col3, 10, tin);
+    u8g2.drawStr(col3 , 20, hum);
+    u8g2.drawStr(col2, 30, preas);
 }
 
 void printProgressBar() {
@@ -195,42 +258,46 @@ void printProgressBar() {
 void readIndoors() {
     float pf = bm.readPressure();
     float tinf = bm.readTemperature();
-
     String temporary = String(tinf);
 
     strcpy(tin, temporary.c_str());
+    SetNoOfDecimals(tin, 1);
+    pf = pf/133.322365;
+    sprintf(preas, "%d hg", (int)pf);
+
+    // Debug prining
     Serial.print("BME t: ");
     Serial.print(temporary);
-    //Serial.print(", h: ");
-    //Serial.print(h);
     Serial.print(", p: ");
-    Serial.print(pf/133.322365);
-    Serial.println(" hg");
-
-    SetNoOfDecimals(tin, 1);
+    Serial.println(pf);
 }
 
-void mqttConnect() {
+int mqttConnect() {
   Serial.print("checking wifi...");
-  int maxcount = 100;
+  int maxcount = 10;
   while (WiFi.status() != WL_CONNECTED && maxcount--) {
     Serial.print(".");
     delay(1000);
   }
 
-  Serial.print("\nconnecting...");
-  while (!client.connect("arduino2", MQTTUSER, MQTTPASS) && maxcount--) {
-    Serial.print(".");
-    delay(1000);
-  }
-  if (maxcount <= 0) {
-    ESP.restart();
+#ifdef DEBUG_PRINT
+  Serial.println("\nconnecting broker...");
+  Serial.println(mqttUser);
+  Serial.print(mqttPass);
+#endif
+  int res = mqttClient.connect("arduino22", mqttUser, mqttPass);
+
+  if (!res) {
+    Serial.println("\nFailed to connect");
+    return false;
   }
 
   Serial.println("\nconnected!");
 
-  client.subscribe(MQTTTOPIC);
-  client.subscribe(MQTTTOPIC2);
+  mqttClient.subscribe(topicT);
+  mqttClient.subscribe(topicH);
+
+  return true;
 }
 
 void messageReceived(String &topic, String &payload) {
@@ -245,7 +312,7 @@ void messageReceived(String &topic, String &payload) {
     SetNoOfDecimals(temp, 1);
   } else if (topic.endsWith("d5h")) {
     if (dot > -1) {
-      // Do not print decimal on hum 
+      // Do not print decimal on hum
       String hstr = payload.substring(0, dot);
       hstr = hstr += '%';
       strncpy(hum, hstr.c_str(), 8);
@@ -257,15 +324,12 @@ void messageReceived(String &topic, String &payload) {
 
 void SetNoOfDecimals(char *str, int noOfDecimals) {
   char *dot = strchr(str, '.');
-  Serial.print("DOT");
-  Serial.println(dot);
   if (noOfDecimals == 0 && dot) {
     *dot = '\0';
     return;
-  } 
+  }
   dot++;
   int l = strlen(dot);
-  Serial.println(l);
   if (l > noOfDecimals) {
     *(dot + noOfDecimals ) = '\0';
   }
