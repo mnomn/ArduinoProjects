@@ -1,6 +1,6 @@
 /*
 
-  Based on HelloWorld.ino from
+  Based on HelloWorld.ino from u8g2
 
   "Hello World" version for U8x8 API
 
@@ -100,11 +100,12 @@ byte displayNumber = 0;
 int configMode = 0;
 int contrast = 0;
 
+#define NR_OF_DISPLAYS 4
+
 void setup(void)
 {
 //   Serial.begin(74880);
   u8g2.setDisplayRotation(U8G2_R0);
-  PrintSendStartScreen();
   Serial.begin(9600);
   while(!Serial);
   Serial.println("");
@@ -114,6 +115,7 @@ void setup(void)
   // Display
   u8g2.begin();
   u8g2.setContrast(contrast);
+  PrintSendStartScreen();
 
   espConfig.setHelpText("MQTT:");
   int res = espConfig.setup();
@@ -171,7 +173,7 @@ void loop(void)
     }
     configMode = 1;
   } else if (pressed > 0) {
-    displayNumber = (displayNumber+1)%2;
+    displayNumber = (displayNumber+1)%NR_OF_DISPLAYS;
     espConfig.setRaw(511, displayNumber);
     Serial.print("Display ");
     Serial.println(displayNumber);
@@ -185,10 +187,14 @@ void loop(void)
     readIndoors();
 
     u8g2.clearBuffer();
-    if (displayNumber == 0) {
-      PrintLayout0();
-    } else {
-      PrintLayout1();
+    if (displayNumber/2==0)
+    {
+      // Display 0 and 1
+      PrintLayoutA(displayNumber);
+    }
+    else
+    {
+      PrintLayoutB(displayNumber);
     }
     u8g2.sendBuffer();
   }
@@ -204,42 +210,48 @@ void PrintSendStartScreen() {
   u8g2.sendBuffer();
 }
 
-void PrintLayout0() {
-    u8g2.setFont(u8g2_font_fub17_tf);
-    u8g2.drawStr(0,19,temp);
-    unsigned int width1 = u8g2.getStrWidth(temp);
+void PrintLayoutA(int rotation) {
+  u8g2.setDisplayRotation(rotation%2?U8G2_R0:U8G2_R2);
 
-    int col2 = width1 + 13;
+  u8g2.setFont(u8g2_font_fub17_tf);
+  u8g2.drawStr(0,19,temp);
+  unsigned int width1 = u8g2.getStrWidth(temp);
 
-    u8g2.drawStr(col2, 19,tin);
-    unsigned int width2 = u8g2.getStrWidth(tin);
+  int col2 = width1 + 23;
 
-    u8g2.setFont(u8g2_font_fub11_tf);
+  u8g2.drawStr(col2, 19,tin);
+  unsigned int width2 = u8g2.getStrWidth(tin);
+
+  u8g2.setFont(u8g2_font_fub11_tf);
 //    u8g2.setFont(u8g2_font_helvB08_tf);
-    u8g2.drawStr(col2 + width2 + 3, 13, "C");
+  u8g2.drawStr(col2 + width2 + 3, 13, "C");
 
-    // u8g2.setFont(u8g2_font_fur11_tf);
-    u8g2.setFont(u8g2_font_helvB08_tf);
-    u8g2.drawStr(0, 30, hum);
-    u8g2.drawStr(col2, 30, preas);
+  // u8g2.setFont(u8g2_font_fur11_tf);
+  u8g2.setFont(u8g2_font_helvB08_tf);
+  u8g2.drawStr(0, 30, hum);
+  u8g2.drawStr(col2, 30, preas);
 
 }
 
-void PrintLayout1() {
+void PrintLayoutB(int rotation) {
+  u8g2.setDisplayRotation(rotation%2?U8G2_R0:U8G2_R2);
 //    u8g2.setFont(u8g2_font_fub25_tf);
-    u8g2.setFont(u8g2_font_helvB24_tf);
-    u8g2.drawStr(0,30,temp);
-    unsigned int width1 = u8g2.getStrWidth(temp);
-    u8g2.setFont(u8g2_font_fub11_tf);
-    u8g2.drawStr(width1 + 4, 15, "C");
+  u8g2.setFont(u8g2_font_helvB24_tf);
+  u8g2.drawStr(0,30,temp);
+  unsigned int width1 = u8g2.getStrWidth(temp);
+  u8g2.setFont(u8g2_font_fub11_tf);
+  u8g2.drawStr(width1 + 2, 13, "c");
 
 //    u8g2.setFont(u8g2_font_courB08_tf);
-    u8g2.setFont(u8g2_font_helvB08_tf);
-    int col2 = 90;
-    int col3 = 100;
-    u8g2.drawStr(col3, 10, tin);
-    u8g2.drawStr(col3 , 20, hum);
-    u8g2.drawStr(col2, 30, preas);
+  u8g2.setFont(u8g2_font_helvB08_tf);
+  int col2 = 90;
+  int col3 = 104;
+  u8g2.drawStr(col3, 10, tin);
+  width1 = u8g2.getStrWidth(tin);
+  u8g2.drawStr(col3 , 20, hum);
+  u8g2.drawStr(col2, 30, preas);
+  // Write a small c after temp
+  u8g2.drawStr(col3 + width1 + 1, 8, "c");
 }
 
 void printProgressBar() {
@@ -258,16 +270,23 @@ void printProgressBar() {
 void readIndoors() {
     float pf = bm.readPressure();
     float tinf = bm.readTemperature();
-    String temporary = String(tinf);
+    // Adjust for heat from mcu and display.
+    tinf -= 10.0;
 
-    strcpy(tin, temporary.c_str());
-    SetNoOfDecimals(tin, 1);
+    // String temporary = String(tinf);
+    // strcpy(tin, temporary.c_str());
+    // SetNoOfDecimals(tin, 1);
+
+    // Simpler without decimals...
+    snprintf(tin, sizeof tin, "%d", round(tinf));
+
     pf = pf/133.322365;
-    sprintf(preas, "%d hg", (int)pf);
+    sprintf(preas, "%d Hg", (int)pf);
 
     // Debug prining
-    Serial.print("BME t: ");
-    Serial.print(temporary);
+    Serial.print("BME tinf: ");
+    // Serial.print(temporary);
+    Serial.print(tinf);
     Serial.print(", p: ");
     Serial.println(pf);
 }
@@ -285,7 +304,7 @@ int mqttConnect() {
   Serial.println(mqttUser);
   Serial.print(mqttPass);
 #endif
-  int res = mqttClient.connect("arduino22", mqttUser, mqttPass);
+  int res = mqttClient.connect("arduino223", mqttUser, mqttPass);
 
   if (!res) {
     Serial.println("\nFailed to connect");
