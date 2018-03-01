@@ -46,6 +46,10 @@
 #include <Adafruit_BMP280.h> // Also install Adafruit Unified Sensor
 
 
+// Calibrate temp
+#define TEMP_OFFSET 1.0
+#define TIN_OFFSET -1.5
+
 const char* MURL = "Broker*";
 const char* MPORT = "number|Port";
 const char* MUSER = "User";
@@ -183,7 +187,7 @@ void loop(void)
   }
 
   if (now >= nextRefresh) {
-    nextRefresh = nextRefresh + 5000; // 5 sec later
+    nextRefresh = nextRefresh + 15000; // 15 sec later
     readIndoors();
 
     u8g2.clearBuffer();
@@ -217,13 +221,14 @@ void PrintLayoutA(int rotation) {
   u8g2.drawStr(0,19,temp);
   unsigned int width1 = u8g2.getStrWidth(temp);
 
-  int col2 = width1 + 23;
+  int col2 = width1 + 35;
 
   u8g2.drawStr(col2, 19,tin);
   unsigned int width2 = u8g2.getStrWidth(tin);
 
   u8g2.setFont(u8g2_font_fub11_tf);
 //    u8g2.setFont(u8g2_font_helvB08_tf);
+  u8g2.drawStr(width1 + 3, 13, "C");
   u8g2.drawStr(col2 + width2 + 3, 13, "C");
 
   // u8g2.setFont(u8g2_font_fur11_tf);
@@ -271,7 +276,7 @@ void readIndoors() {
     float pf = bm.readPressure();
     float tinf = bm.readTemperature();
     // Adjust for heat from mcu and display.
-    tinf -= 10.0;
+    tinf += TIN_OFFSET;
 
     // String temporary = String(tinf);
     // strcpy(tin, temporary.c_str());
@@ -327,8 +332,11 @@ void messageReceived(String &topic, String &payload) {
 
   if (topic.endsWith("d5t")) {
     temptime_ms = millis();
-    strncpy(temp, payload.c_str(), 8);
-    SetNoOfDecimals(temp, 1);
+    float f = payload.toFloat();
+    // Convert to float so we can calibrate, then convert back to string
+    f += TEMP_OFFSET;
+    snprintf(temp, sizeof(temp), "%d", round(f), 8);
+    // SetNoOfDecimals(temp, 1);
   } else if (topic.endsWith("d5h")) {
     if (dot > -1) {
       // Do not print decimal on hum
