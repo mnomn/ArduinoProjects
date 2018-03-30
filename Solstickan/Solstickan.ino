@@ -200,6 +200,7 @@ void loop(void)
     {
       PrintLayoutB(displayNumber);
     }
+    printProgressBar();
     u8g2.sendBuffer();
   }
 
@@ -221,15 +222,15 @@ void PrintLayoutA(int rotation) {
   u8g2.drawStr(0,19,temp);
   unsigned int width1 = u8g2.getStrWidth(temp);
 
-  int col2 = width1 + 35;
+  int col2 = width1 + 20;
 
   u8g2.drawStr(col2, 19,tin);
   unsigned int width2 = u8g2.getStrWidth(tin);
 
   u8g2.setFont(u8g2_font_fub11_tf);
 //    u8g2.setFont(u8g2_font_helvB08_tf);
-  u8g2.drawStr(width1 + 3, 13, "C");
-  u8g2.drawStr(col2 + width2 + 3, 13, "C");
+  u8g2.drawStr(width1 + 2, 11, "c");
+  u8g2.drawStr(col2 + width2 + 2, 11, "c");
 
   // u8g2.setFont(u8g2_font_fur11_tf);
   u8g2.setFont(u8g2_font_helvB08_tf);
@@ -251,47 +252,55 @@ void PrintLayoutB(int rotation) {
   u8g2.setFont(u8g2_font_helvB08_tf);
   int col2 = 90;
   int col3 = 104;
-  u8g2.drawStr(col3, 10, tin);
+  u8g2.drawStr(col2, 10, tin);
   width1 = u8g2.getStrWidth(tin);
-  u8g2.drawStr(col3 , 20, hum);
+  u8g2.drawStr(col2 , 20, hum);
   u8g2.drawStr(col2, 30, preas);
   // Write a small c after temp
-  u8g2.drawStr(col3 + width1 + 1, 8, "c");
+  u8g2.drawStr(col2 + width1 + 1, 8, "c");
 }
 
 void printProgressBar() {
-  unsigned long age_sec = (millis() - temptime_ms)/1000;
-  if (age_sec > 5/* *60 */) { // Do not show progress bar the first 5min
-    #define bar_time_sec (30*60)
-    #define bar_len_px (120)
-    unsigned long px = age_sec/bar_time_sec*bar_len_px;
-    if (px > bar_time_sec) px = bar_time_sec;
-
-    u8g2.drawLine(0, 31, px, 31);
+  //min, 1, 2, 4, 8, 16
+  unsigned long age_min = (millis() - temptime_ms)/(60 * 1000);
+  int col = 127;
+  if (age_min >= 1) {
+      u8g2.drawLine(col, 31, col, 29);
+  }
+  if (age_min >= 2) {
+    u8g2.drawLine(col, 27, col, 25);
+  }
+  if (age_min >= 4) {
+    u8g2.drawLine(col, 23, col, 21);
+  }
+  if (age_min >= 8) {
+    u8g2.drawLine(col, 19, col, 17);
+  }
+  if (age_min >= 16) {
+    u8g2.drawLine(col, 15, col, 13);
+  }
+  if (age_min >= 32) {
+    u8g2.drawLine(col, 11, col, 9);
+  }
+  if (age_min >= 64) {
+    u8g2.drawLine(col, 7, col, 5);
   }
 
 }
 
 void readIndoors() {
     float pf = bm.readPressure();
-    float tinf = bm.readTemperature();
+    float tf = bm.readTemperature();
     // Adjust for heat from mcu and display.
-    tinf += TIN_OFFSET;
-
-    // String temporary = String(tinf);
-    // strcpy(tin, temporary.c_str());
-    // SetNoOfDecimals(tin, 1);
-
-    // Simpler without decimals...
-    snprintf(tin, sizeof tin, "%d", round(tinf));
+    tf += TIN_OFFSET;
+    Float2str(tf, tin, sizeof(tin));
 
     pf = pf/133.322365;
     sprintf(preas, "%d Hg", (int)pf);
 
     // Debug prining
-    Serial.print("BME tinf: ");
-    // Serial.print(temporary);
-    Serial.print(tinf);
+    Serial.print("BME t: ");
+    Serial.print(tf);
     Serial.print(", p: ");
     Serial.println(pf);
 }
@@ -335,8 +344,8 @@ void messageReceived(String &topic, String &payload) {
     float f = payload.toFloat();
     // Convert to float so we can calibrate, then convert back to string
     f += TEMP_OFFSET;
-    snprintf(temp, sizeof(temp), "%d", round(f), 8);
-    // SetNoOfDecimals(temp, 1);
+    // snprintf(temp, sizeof(temp), "%d", round(f), 8);
+    Float2str(f, temp, sizeof(temp));
   } else if (topic.endsWith("d5h")) {
     if (dot > -1) {
       // Do not print decimal on hum
@@ -349,15 +358,13 @@ void messageReceived(String &topic, String &payload) {
   }
 }
 
-void SetNoOfDecimals(char *str, int noOfDecimals) {
-  char *dot = strchr(str, '.');
-  if (noOfDecimals == 0 && dot) {
-    *dot = '\0';
-    return;
+// Print float to string with one decimal
+void Float2str(float f, char *s, int slen)
+{
+  bool neg = false;
+  if (f < 0) {
+    neg = true;
+    f *= -1;
   }
-  dot++;
-  int l = strlen(dot);
-  if (l > noOfDecimals) {
-    *(dot + noOfDecimals ) = '\0';
-  }
+  snprintf(s, slen, "%s%d.%d", neg?"-":"", (int)f, ((int)(f*10)) % 10 );
 }
