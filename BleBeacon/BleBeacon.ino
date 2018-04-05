@@ -1,6 +1,8 @@
 
 #define USE_DHT
 #define USE_BLE
+// #define USE_BLE_NAME
+
 
 // ATTiny85:
 // https://github.com/SpenceKonde/ATTinyCore
@@ -22,11 +24,10 @@
   SoftwareSerial() RX: 1, TX: 2
 */
 
-
 // Protocol 16 bits
-// 15 .. 0
-// 15 .. 10: humidity/2 , 0 .. 50
-// 9 .. 0 (temp + 30) *10, 0..1023
+// Crappy BLE clone board. Jam all data into 16 bits.
+// 6 bit humidity: 15 .. 10: humidity/2     , 0 .. 50
+// 10 buit temp  :  9 ..  0: (temp + 30) *10, 0..1023
 
 #define MYDEBUG
 #define AT_NL "\r\n"
@@ -56,14 +57,15 @@ SoftwareSerial ble(14,12);
 #define LED_INVERTED
 #endif
 
-unsigned long intervalS = 120;
+unsigned long intervalS = (5*60);
 unsigned long nextSendS = 10; // first interval shorter
 
 #ifdef USE_DHT
 dht DHT;
 #endif
 
-// // Round to "int + half", 2.3->2.5, 3.9->4.0 etc
+#ifdef USE_BLE_NAME
+// Round to "int + half", 2.3->2.5, 3.9->4.0 etc
 void roundHalf(float tin, int *h, int *d)
 {
 	int sign = 1;
@@ -72,6 +74,7 @@ void roundHalf(float tin, int *h, int *d)
 	*h = t2/2;
 	*d = 5*sign*(t2%2);
 }
+#endif
 
 void sendcmd(char *cmd)
 {
@@ -131,6 +134,11 @@ void setup()
   sendcmd("ADVI0");// broadcast interval
   sendcmd("ADVEN1");// broadcast
 
+// Clear name
+// #ifndef USE_BLE_NAME
+//   sendcmd("NAME ");// Set name to space
+// #endif
+
   digitalWrite(POWER_PIN, LOW);
 
 }
@@ -170,6 +178,7 @@ void loop()
 
   //wakeupBle();
 #ifdef USE_DHT
+#ifdef USE_BLE_NAME
   if(dht_err) {
     sprintf(cmdbuff,"NAME:(:(");
   }
@@ -184,6 +193,8 @@ void loop()
 
   sendcmd(cmdbuff);
   delay(100);
+#endif // #endif
+
 
   unsigned int t, h;
 #ifdef USE_DHT
@@ -202,14 +213,27 @@ void loop()
   // sprintf(cmdbuff,"CHARFE01", h);
   // sendcmd(cmdbuff);
   // sendcmd("RESET");// Must reset for new UUID and char to broadcast
-  unsigned int uuid = h << 10 + t;
+  unsigned int uuid = 0;
+
+  if(! dht_err) {
+    // No err
+    uuid = (h << 10) + t;
+  }
   sprintf(cmdbuff,"UUID%04X", uuid);
+
   sendcmd(cmdbuff);
 
-  // sprintf(cmdbuff,"CHARFF%02X", h);
-  // sendcmd(cmdbuff);
+  delay(100);
   sendcmd("RESET");// Must reset for new UUID and CHAR to broadcast
-  delay(500);
+
+  // static int uuid_char = 0;
+  // uuid_char++;
+  // if (uuid_char == 256) uuid_char = 0;
+  // sprintf(cmdbuff,"CHARFE%02X", uuid_char);
+  // sendcmd(cmdbuff);
+  // delay(500);
+  // sendcmd("RESET");// Must reset for new UUID and CHAR to broadcast
+  delay(100);
   sendcmd(NULL);//Send AT
   sendcmd("ADVEN1");// broadcast
   delay(1000);
