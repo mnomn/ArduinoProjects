@@ -47,7 +47,6 @@
 
 
 // Calibrate temp
-#define TEMP_OFFSET 1.0
 #define TIN_OFFSET -1.5
 
 const char* MURL = "Broker*";
@@ -116,10 +115,14 @@ void setup(void)
   delay(10);
   Serial.println("Start");
 
+  // Initialize some strings...
+  strcpy(temp, "99.9");
+  strcpy(hum, "99%");
+
   // Display
   u8g2.begin();
   u8g2.setContrast(contrast);
-  PrintSendStartScreen();
+  PrintSendStartScreen("Solstickan");
 
   espConfig.setHelpText("MQTT:");
   int res = espConfig.setup();
@@ -134,6 +137,11 @@ void setup(void)
   mqttPass = espConfig.getParameter(MPASS);
   topicT = espConfig.getParameter(TTOPIC);
   topicH = espConfig.getParameter(HTOPIC);
+
+  Serial.print("Topics:");
+  Serial.print(topicT);
+  Serial.print(", ");
+  Serial.println(topicH);
 
   char *port = espConfig.getParameter(MPORT);
   if (strlen(port) > 1) {
@@ -153,10 +161,6 @@ void setup(void)
     Serial.println("BME Connected");
   }
 
-  // Initialize some strings...
-  strcpy(temp, "99.9");
-  strcpy(hum, "99%");
-
 }
 
 void loop(void)
@@ -167,14 +171,13 @@ void loop(void)
 
   if (configMode) {
     digitalWrite(LED_BUILTIN, (now/1000)%2 == 0?HIGH:LOW);
-    exit;
+    return;
   }
 
   int pressed = espXtra.ButtonPressed(0);
   if (pressed > 5) {
-    if (!configMode) {
-      espConfig.clearConfig();
-    }
+    PrintSendStartScreen("Config...");
+    espConfig.clearConfig();
     configMode = 1;
   } else if (pressed > 0) {
     displayNumber = (displayNumber+1)%NR_OF_DISPLAYS;
@@ -209,9 +212,10 @@ void loop(void)
   }
 }
 
-void PrintSendStartScreen() {
+void PrintSendStartScreen(char *str) {
+  if (!str) return;
   u8g2.setFont(u8g2_font_fub17_tf);
-  u8g2.drawStr(2,22,"Solstickan");
+  u8g2.drawStr(2,22,str);
   u8g2.sendBuffer();
 }
 
@@ -339,22 +343,13 @@ void messageReceived(String &topic, String &payload) {
   int dot = payload.indexOf('.');
   Serial.println("incoming: " + topic + " - " + payload + " l:" + ll);
 
-  if (topic.endsWith("d5t")) {
-    temptime_ms = millis();
-    float f = payload.toFloat();
-    // Convert to float so we can calibrate, then convert back to string
-    f += TEMP_OFFSET;
-    // snprintf(temp, sizeof(temp), "%d", round(f), 8);
-    Float2str(f, temp, sizeof(temp));
-  } else if (topic.endsWith("d5h")) {
-    if (dot > -1) {
-      // Do not print decimal on hum
-      String hstr = payload.substring(0, dot);
-      hstr = hstr += '%';
-      strncpy(hum, hstr.c_str(), 8);
-    } else {
-      strncpy(hum, payload.c_str(), 8);
-    }
+  if (0==strcmp(topic.c_str(), topicT))
+  {
+    strncpy(temp, payload.c_str(), sizeof(temp));
+  }
+  else if (0==strcmp(topic.c_str(), topicH))
+  {
+    snprintf(hum, sizeof(hum), "%s%%", payload.c_str());
   }
 }
 
