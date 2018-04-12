@@ -345,6 +345,7 @@ void messageReceived(String &topic, String &payload) {
 
   if (0==strcmp(topic.c_str(), topicT))
   {
+    temptime_ms = millis();
     strncpy(temp, payload.c_str(), sizeof(temp));
   }
   else if (0==strcmp(topic.c_str(), topicH))
