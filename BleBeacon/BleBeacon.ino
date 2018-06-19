@@ -1,18 +1,20 @@
 
-#define USE_DHT
+// #define USE_DHT // The lib does not work with esp8266
 #define USE_BLE
-// #define USE_BLE_NAME
+//#define USE_BLE_NAME
 
 
 // ATTiny85:
 // https://github.com/SpenceKonde/ATTinyCore
 
 #include <SoftwareSerial.h>
-#ifdef USE_DHT
-#include "dht.h" // https://github.com/RobTillaart/Arduino
-#endif //USE_DHT
 #ifdef ARDUINO_AVR_ATTINYX5
 #include "TinyXtra.h" //https://github.com/mnomn/TinyXtra
+#ifdef USE_DHT
+// This lib does not work with esp8266
+#include "dht.h" // https://github.com/RobTillaart/Arduino
+#endif //USE_DHT
+
 #endif
 
 /*
@@ -52,17 +54,25 @@ SoftwareSerial ble(14,12);
 #define DBGSERIALC(x) Serial.write(x)
 #define DEBWRITEC(c) Serial.write(c)
 #define DHTPIN 5 // Wemos D1
-#define POWER_PIN LED_BUILTIN
+//#define POWER_PIN LED_BUILTIN GPIO2, WemosD4
+#define POWER_PIN 4 //Gpio4, WemosD2
 
 #define LED_INVERTED
 #endif
 
-unsigned long intervalS = (5*60);
+unsigned long intervalS = 30;// (5*60);
 unsigned long nextSendS = 10; // first interval shorter
 
 #ifdef USE_DHT
 dht DHT;
+#else
+struct {
+  float temperature;
+  float humidity;
+} DHT;
 #endif
+
+int dbgcount = 0;
 
 #ifdef USE_BLE_NAME
 // Round to "int + half", 2.3->2.5, 3.9->4.0 etc
@@ -135,9 +145,9 @@ void setup()
   sendcmd("ADVEN1");// broadcast
 
 // Clear name
-// #ifndef USE_BLE_NAME
-//   sendcmd("NAME ");// Set name to space
-// #endif
+ #ifndef USE_BLE_NAME
+   sendcmd("NAME_");
+ #endif
 
   digitalWrite(POWER_PIN, LOW);
 
@@ -148,9 +158,9 @@ void loop()
   char cmdbuff[32];
   int tint, tdeci;
 
+  digitalWrite(POWER_PIN, LOW);
 #ifdef ARDUINO_AVR_ATTINYX5
   if (sleep_count * 8 < nextSendS) {
-    digitalWrite(POWER_PIN, LOW);
     sleep_count++;
     tX.sleep_8s();
     return;
@@ -160,7 +170,6 @@ void loop()
 #else
   if (millis() < nextSendS*1000)
   {
-    digitalWrite(POWER_PIN, LOW);
     delay(1000);
     return;
   }
@@ -170,14 +179,45 @@ void loop()
 
   digitalWrite(POWER_PIN, HIGH);
   delay(300);// Wait for boot
-
+  int dht_err = 0;
 #ifdef USE_DHT
-  int dht_err = DHT.read21(DHTPIN);
+  dht_err = DHT.read21(DHTPIN);
+#else
+  // Set dummy values
+  DHT.temperature = dbgcount;
+  DHT.humidity = 60;// Will become 0xF000 after <<10
+  if (++dbgcount>50) dbgcount=0;
 #endif
-  sendcmd("NAME");
 
-  //wakeupBle();
+//sendcmd("NAME");
+
+  unsigned int t, h;
 #ifdef USE_DHT
+  // -30 ... +70 -> 0000  ... 1000
+  t = (unsigned)((DHT.temperature + 30) * 10);
+  h = (unsigned)(DHT.humidity/2);// 0 - 50
+#else
+  h = DHT.humidity;
+  t = DHT.temperature;
+
+#endif
+  // CHAR doe not work/updates, so I jam all data into UUID
+  // sprintf(cmdbuff,"CHARFE01", h);
+  // sendcmd(cmdbuff);
+  // sendcmd("RESET");// Must reset for new UUID and char to broadcast
+  unsigned int uuid = 0;
+
+
+  if(! dht_err) {
+    // No err
+    uuid = (h << 10) + t;
+  }
+
+  // Send values as UUIDUUID 
+  sprintf(cmdbuff,"UUID%04X", uuid);
+
+  sendcmd(cmdbuff);
+
 #ifdef USE_BLE_NAME
   if(dht_err) {
     sprintf(cmdbuff,"NAME:(:(");
@@ -187,55 +227,16 @@ void loop()
     roundHalf(DHT.temperature, &tint, &tdeci);
     sprintf(cmdbuff,"NAME:)%d.%d:(%d", tint, tdeci, (int)DHT.humidity);
   }
-#else
-    sprintf(cmdbuff,"NAME:)%d:(%d", millis()%98, millis()%89);
-#endif
-
   sendcmd(cmdbuff);
-  delay(100);
-#endif // #endif
-
-
-  unsigned int t, h;
-#ifdef USE_DHT
-  // -30 ... +70 -> 0000  ... 1000
-  t = (unsigned)((DHT.temperature + 30) * 10);
-  h = (unsigned)(DHT.humidity/2);// 0 - 50
-#else
-  t = millis()%998;
-  static int hh = 0;
-  h = hh;
-  hh++;
-  if (hh>50) hh=0;
-
 #endif
-  // CHAR doe not work/updates, so I jam all data into UUID
-  // sprintf(cmdbuff,"CHARFE01", h);
-  // sendcmd(cmdbuff);
-  // sendcmd("RESET");// Must reset for new UUID and char to broadcast
-  unsigned int uuid = 0;
-
-  if(! dht_err) {
-    // No err
-    uuid = (h << 10) + t;
-  }
-  sprintf(cmdbuff,"UUID%04X", uuid);
-
-  sendcmd(cmdbuff);
 
   delay(100);
   sendcmd("RESET");// Must reset for new UUID and CHAR to broadcast
 
-  // static int uuid_char = 0;
-  // uuid_char++;
-  // if (uuid_char == 256) uuid_char = 0;
-  // sprintf(cmdbuff,"CHARFE%02X", uuid_char);
-  // sendcmd(cmdbuff);
-  // delay(500);
-  // sendcmd("RESET");// Must reset for new UUID and CHAR to broadcast
   delay(100);
   sendcmd(NULL);//Send AT
   sendcmd("ADVEN1");// broadcast
   delay(1000);
   sendcmd("ADVEN0");// broadcast
+  delay(100);
 }
