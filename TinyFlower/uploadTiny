@@ -1,0 +1,3 @@
+#!/bin/bash
+
+$(find  ~/.platformio -name micronucleus) -c digispark --timeout 60 -D .pioenvs/attiny85/firmware.hex
