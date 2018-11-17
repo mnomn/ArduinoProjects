@@ -38,6 +38,7 @@ UI: One button, one led
 #define SERIAL_DBG_PIN 4
 
 #define CHECK_INTERVAL_SEC 30
+#define PUMP_SEC 5
 
 //#ifdef F_CPU
 #undef F_CPU
@@ -53,7 +54,7 @@ TinyXtra tinyX;
 
 const unsigned long intervalms = (unsigned long)(CHECK_INTERVAL_SEC * 1000);
 unsigned long prevms = 0;
-short thresVal = -1;
+unsigned short thresVal = -1;
 
 void blinkLong() {
     digitalWrite(LED_PIN, HIGH);
@@ -77,9 +78,13 @@ void flickerBad() {
     }
 }
 
-void blinkVal(int v) {
+void blinkVal(unsigned short v) {
     // Blink value
-    char mess[64];;
+    char mess[64];
+    if (v<0) {
+        flickerBad();
+        return;
+    }
     int l = v/100;
     int s = (v - l*100)/10;
     while (l > 0 && l--) {
@@ -91,21 +96,30 @@ void blinkVal(int v) {
     }
     // One extra blink to show "alive"
     blinkShort();
-    snprintf(mess, sizeof(mess), "V:%d\n", v);
+    #ifdef EXTRA_DBG
+    snprintf(mess, sizeof(mess), "V:%hu\n", v);
     tinyX.dbgString(mess);
+    #endif
+}
+
+void removeThres() {
+    #ifdef EXTRA_DBG
+    tinyX.dbgString((char*)"RemoveThreshold!\n");
+    #endif
+    thresVal = -1;
+    EEPROM.put(0, (char)0);
 }
 
 void setThres() {
     char mess[64];
-    EEPROM.put(0, EEPROM_WRITTEN);
     unsigned short v = analogRead(MEASURE_PIN);
     #ifdef EXTRA_DBG
-    sprintf(mess, "Set val: %hu\n", v);
+    sprintf(mess, "Set val: %hd\n", v);
     tinyX.dbgString(mess);
     #endif
     if (v < 50 || (1023-50) < v ) {
         // Angry blink to show failure
-        sprintf(mess, "Bad val: %hu\n", v);
+        sprintf(mess, "Bad val: %hd\n", v);
         tinyX.dbgString(mess);
         flickerBad();
     }
@@ -113,6 +127,8 @@ void setThres() {
         // Long blink OK
         blinkLong();
     }
+    thresVal = v;
+    EEPROM.put(0, (char)EEPROM_WRITTEN);
     EEPROM.put(1, v);
 }
 
@@ -129,7 +145,7 @@ void setup() {
     tinyX.dbgSetTxPin(SERIAL_DBG_PIN);
 
     // Boot hello!
-    tinyX.dbgString((char*)"Hi!\n");
+    tinyX.dbgString((char*)"\nHi!\n");
     blinkShort();
     digitalWrite(PUMP_PIN, HIGH);
     delay(1000);
@@ -147,39 +163,43 @@ void setup() {
     }
     else {
         flickerBad();
+        tinyX.dbgString((char *)"No threshold\n");
     }
 }
 
 void handleButton() {
     char mess[64];
     unsigned long start=millis();
+
     while(digitalRead(BUTTON_PIN) == LOW) delay(50);
+
     unsigned long lenMS=(millis() - start);
 
-    if (lenMS > 3000) {
+    if (lenMS > 10*1000) {
+        removeThres();
+    }
+    else if (lenMS > 3*1000) {
         setThres();
     }
     else if (lenMS > 100) {
-        tinyX.dbgString((char *)"ShortPress\n");
         // What? Pump? Blink values?
         #ifdef EXTRA_DBG
         unsigned short v = analogRead(MEASURE_PIN);
-        sprintf(mess, "Current ADC val: %hu\n", v);
+        blinkVal(v);
         sprintf(mess, "Stored threshold val: %hu\n", thresVal);
         tinyX.dbgString(mess);
         #endif
     }
     else {
         // Too short. Bounce? Sleep wake up?
+        #ifdef EXTRA_DBG
         tinyX.dbgString((char *)"Bounce\n");
+        #endif
     }
 
 }
 void loop() {
     int sleep_counter = 0;
-    // if (TinyXtra::interrupt) {
-    //     TinyXtra::interrupt = false;
-    // }
 
     while(sleep_counter * 8 < CHECK_INTERVAL_SEC) {
         if (TinyXtra::interrupt) {
@@ -187,6 +207,7 @@ void loop() {
             tinyX.dbgString((char *)"INT\n");
             #endif
             handleButton();
+            TinyXtra::interrupt = false;
         }
 
         sleep_counter++;
@@ -196,16 +217,22 @@ void loop() {
         tinyX.sleep_8s();
     }
 
+    #ifdef EXTRA_DBG
     tinyX.dbgString((char *)"No more sleep\n");
+    #endif
 
-    unsigned long since_prev_ms = millis() - prevms;
-    if (since_prev_ms >= intervalms) {
-        prevms += intervalms;
-        delay(1000);
-        int v = analogRead(MEASURE_PIN);
-        blinkVal(v);
+    if (thresVal == (unsigned short)-1) {
+        tinyX.dbgString((char *)"Thres not set\n");
+        return;
     }
 
-    return;
-
+    unsigned short v = analogRead(MEASURE_PIN);
+    blinkVal(v);
+    if (thresVal > 0 && v > thresVal) {
+        digitalWrite(PUMP_PIN, HIGH);
+        digitalWrite(LED_PIN, HIGH);
+        delay(PUMP_SEC * 1000);
+        digitalWrite(PUMP_PIN, LOW);
+        digitalWrite(LED_PIN, LOW);
+    }
 }
