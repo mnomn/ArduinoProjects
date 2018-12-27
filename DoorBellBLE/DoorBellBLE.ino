@@ -14,26 +14,47 @@
 
   http://www.arduino.cc/en/Tutorial/Tone
 
+
+
   OlaA:
 
   Build for AtTiny85. No USB boot loder to get faster response
   Programmer: Arduino as ISP (Program AtTiny85 via arduino)
+              or USBTinyISP
+
   Add BLE Module on 5v (no code)
+  Version 2: Added sleep and interrupt.
 
   Notes from // http://www.astlessons.com/pianoforkidssv.html
   
   
 */
 
+
+#include "TinyXtra.h" // https://github.com/mnomn/TinyXtra
+
 #include "pitches.h"
 
 #ifdef ARDUINO_AVR_ATTINYX5
 // 4 is next to ground
-#define PLAYPIN 4
+#define PLAY_PIN 4
 #else
-#define PLAYPIN 4
+#define PLAY_PIN 4
 #endif
 
+
+/** If defined, MCU is in sleep mode untill an interrupt is received, then plays the entire melody
+ * and goes back to sleep.
+ * If not defined, it will play the melody when/for as long it is powered on.
+*/
+#define PLAY_ON_INTERRUPT_PIN 1
+
+#ifdef PLAY_ON_INTERRUPT_PIN
+#define BLE_PIN 0 // Pin that enables BLE module.
+#endif
+
+
+TinyXtra tinyX;
 
 #if 0
 // Kalle Johansson
@@ -84,28 +105,51 @@ int notes = 8;
 int speed = 3500; // ms of a whole note
 #endif
 
-void setup() {
-  int repeat = 2;
+void PlayMelody()
+{
   int noteDuration;
   int pauseBetweenNotes;
+  // iterate over the notes of the melody:
+  for (int thisNote = 0; thisNote < notes; thisNote++) {
+
+    noteDuration = speed / noteDurations[thisNote];
+    tone(PLAY_PIN, melody[thisNote], noteDuration);
+
+    // to distinguish the notes, set a minimum time between them.
+    // the note's duration + 30% seems to work well:
+    pauseBetweenNotes = noteDuration * 1.10;
+    delay(pauseBetweenNotes);
+    // stop the tone playing:
+  }
+
+}
+
+void setup()
+{
+  pinMode(PLAY_PIN, OUTPUT);
+  pinMode(BLE_PIN, OUTPUT);
+
+  digitalWrite(PLAY_PIN, LOW);
+  tinyX.disableAdc();
+#ifdef PLAY_ON_INTERRUPT_PIN
+  pinMode(PLAY_ON_INTERRUPT_PIN, INPUT_PULLUP);
+  tinyX.setupInterrupt(PLAY_ON_INTERRUPT_PIN);
+#else
+  int repeat = 2;
   while (repeat--)
   {
-    // iterate over the notes of the melody:
-    for (int thisNote = 0; thisNote < notes; thisNote++) {
-
-      noteDuration = speed / noteDurations[thisNote];
-      tone(PLAYPIN, melody[thisNote], noteDuration);
-
-      // to distinguish the notes, set a minimum time between them.
-      // the note's duration + 30% seems to work well:
-      pauseBetweenNotes = noteDuration * 1.10;
-      delay(pauseBetweenNotes);
-      // stop the tone playing:
-    }
+    PlayMelody();
   }
-  noTone(PLAYPIN);
+#endif
+  noTone(PLAY_PIN);
 }
 
 void loop() {
-  // no need to repeat the melody.
+#ifdef PLAY_ON_INTERRUPT_PIN
+  tinyX.sleep();
+  digitalWrite(BLE_PIN, HIGH);
+  PlayMelody();
+  digitalWrite(BLE_PIN, LOW);
+  delay(200);
+#endif
 }
