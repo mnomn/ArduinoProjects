@@ -26,8 +26,6 @@
   Version 2: Added sleep and interrupt.
 
   Notes from // http://www.astlessons.com/pianoforkidssv.html
-  
-  
 */
 
 
@@ -47,7 +45,7 @@
  * and goes back to sleep.
  * If not defined, it will play the melody when/for as long it is powered on.
 */
-#define PLAY_ON_INTERRUPT_PIN 1
+#define PLAY_ON_INTERRUPT_PIN 3 /* Pin 3 has an external pull up.*/
 
 #ifdef PLAY_ON_INTERRUPT_PIN
 #define BLE_PIN 0 // Pin that enables BLE module.
@@ -132,7 +130,6 @@ void setup()
   digitalWrite(PLAY_PIN, LOW);
   tinyX.disableAdc();
 #ifdef PLAY_ON_INTERRUPT_PIN
-  pinMode(PLAY_ON_INTERRUPT_PIN, INPUT_PULLUP);
   tinyX.setupInterrupt(PLAY_ON_INTERRUPT_PIN);
 #else
   int repeat = 2;
@@ -147,6 +144,16 @@ void setup()
 void loop() {
 #ifdef PLAY_ON_INTERRUPT_PIN
   tinyX.sleep();
+  int count = 10;
+  while(count--) {
+    /*
+     * Make sure it was not a glitch/induced spike/etc,
+     * but a propper button press. Pin shall be low for more than 10 ms.
+     */
+    delay(10);
+    if (digitalRead(PLAY_ON_INTERRUPT_PIN) == HIGH) return;
+  }
+
   digitalWrite(BLE_PIN, HIGH);
   PlayMelody();
   digitalWrite(BLE_PIN, LOW);
