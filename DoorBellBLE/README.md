@@ -2,8 +2,8 @@
 
 A simple modification of the buzzer sketch provided by arduino tutorials.
 
-If PLAY_ON_INTERRUPT_PIN is defined, it will play a melody when it gets an interript on pin. If not set it lays a melody when it is powered up (by door bell).
+If PLAY_ON_INTERRUPT_PIN is defined, it will play a melody when it gets an interrupt on pin. If not set it plays a melody when it is powered up (by door bell).
 
-Connect a ble board and it will be powered whn door bell rings, so it can broadcast a preconfirured ble signal.
+Use an arduino without USB, becasue usb bootloader causes a delay before play.
 
-Use an arduino without USB, becasue usb bootloader causes a timeout.
+Connect a preconfigured ble board to the arduino/microcontroller and it will be powered up and start broadcasting when the door bell rings.
