@@ -2,7 +2,9 @@
 
 #Test script tested on linux. Should wark on mac too.
 
+if [ "$USERPASS" == "" ]; then
 USERPASS='-u ADMIN:PASS'
+fi
 
 echo "Test SSS. Arg 1 shall be ip nr"
 
@@ -12,6 +14,14 @@ echo "USERPASS: $USERPASS"
     echo "No IP in arg 1"
     exit 1
 }
+
+if [ "$2" != "" ]
+then
+    echo "Set $2"
+    curl $USERPASS -X POST -w ", code=%{http_code}"  $1'/switch?set='$2
+    echo
+    exit 0
+fi
 
 echo "Test $1"
 
