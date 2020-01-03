@@ -2,6 +2,7 @@
 #include <ESPWebConfig.h> // https://github.com/mnomn/ESPWebConfig
 #include <ArduinoOTA.h>
 #include <Adafruit_NeoPixel.h>
+#include <EEPROM.h>
 #include "index.h"
 
 // App,    Wmos, descriptuin, ArduinoPin
@@ -31,13 +32,19 @@ unsigned long lastBlinkTime = 0;
 
 Adafruit_NeoPixel strip(LED_COUNT, NEO_LED_PIN, NEO_GRB + NEO_KHZ800);
 void rainbow(int wait);
-void oneColor(int pixelHue /* 0 - 65535*/);
+void oneColor(int rgb);
 void handleRoot();
 void handleModes();
+void readMode(int mode);
 
 ESPWebConfig espConfig;
 ESP8266WebServer server(80);
 bool ota = false;
+int mod = 0;
+unsigned col = 0;
+int spe = 0;
+int whi = 0;
+
 void setup() {
   Serial.begin(115200);
   while(!Serial) {
@@ -95,6 +102,9 @@ void setup() {
   Serial.printf("CID %d %X ",cid, cid);
   Serial.println(WiFi.macAddress());
 
+  EEPROM.begin(512);
+  readMode(1);
+
   server.on("/", handleRoot);
   server.on("/modes", handleModes);
   server.begin();
@@ -111,25 +121,15 @@ void loop() {
   lastBlinkTime = now;
   Serial.printf("now %lu B1:%d B2:%d \n", now, digitalRead(BUTTON1), digitalRead(BUTTON2));
 
-  // delay(1000);
-  Serial.printf("now %lu D2: %lu\n", now, now%255);
-//  Serial.printf("LED2 %d %s\n", D5 , digitalRead(D5)?"ON":"OFF");
-
-//  digitalWrite(LED_BUILTIN, !digitalRead(LED_BUILTIN));
-//  digitalWrite(D2, now%2);
-  analogWrite(D2,now%255);
+  analogWrite(D2,whi);
 
 //  rainbow(10);             // Flowing rainbow cycle along the whole strip
-  oneColor(12000);
+  oneColor(col);
 
 }
 
-void oneColor(int pixelHue /* 0 - 65535*/) {
-  for(int i=0; i<strip.numPixels(); i++) { // For each pixel in strip...
-    strip.setPixelColor(i, strip.gamma32(strip.ColorHSV(pixelHue)));
-  }
-  // uint32_t color = strip.getPixelColor(1);
-  // Serial.printf("COL %u", color);
+void oneColor(int rgb) {
+  strip.fill(rgb, 0, 8);
   strip.show(); // Update strip with new contents
 }
 
@@ -162,19 +162,70 @@ void handleRoot() {
 }
 
 
-void getMod(int pos) {
-  char *spe = (char*)"spe_";
-  spe[3] = 48+pos;
-  Serial.printf("Get SPE %s  - ", spe);
-  Serial.println(server.arg(spe));
+void saveMode(int pos) {
+  // Every setting has: mode(1), col(3), speed(1), white(1) = 6 bytes
+  // Stored on address 400, 410, 420, 430
+  // 399 store which mode is selected
+  int addr = 400 + 10 * (pos-1);
+  char key[5] = {'m', 'o', 'd', (char)(48+pos), 0};
+  String valStr = server.arg(key);
+  int val = valStr.toInt();
+  Serial.printf("%s %d %s %d\n", key, addr, valStr.c_str(), val);
+  EEPROM.write(addr++, val);
+
+  // Color, 3 bytes
+  memcpy(key, "col", 3); // Do not copy nullterminator
+  valStr = server.arg(key);
+  const char *colStr = valStr.c_str();
+  if (colStr[0] == '#') colStr++; // If "#FFAACC" format, skip 1.
+  char *end;
+  val = strtol(colStr, &end, 16);
+  Serial.printf("%s %d %s %d %0X\n", key, addr, valStr.c_str(), val, val);
+  // Serial.printf("COL 0x%X %u\n", col, col);
+  EEPROM.write(addr++, val>>16);
+  EEPROM.write(addr++, (val>>8)&0xFF);
+  EEPROM.write(addr++, val&0xFF);
+
+  memcpy(key, "spe", 3); // Do not copy null terminator
+  valStr = server.arg(key);
+  val = valStr.toInt();
+  Serial.printf("%s %d %s %d\n", key, addr, valStr.c_str(), val);
+  EEPROM.write(addr++, val);
+
+  memcpy(key, "whi", 3); // Do not copy null terminator
+  valStr = server.arg(key);
+  val = valStr.toInt();
+  Serial.printf("%s %d %s %d\n", key, addr, valStr.c_str(), val);
+  EEPROM.write(addr++, val);
 }
 
+void readMode(int pos) {
+  // Read parameters from eeprom.
+  // If mode <= 0, read which mode to use from flash
+  if (pos <= 0) {
+    // TODO
+  }
+  int addr = 400 + 10 * (pos - 1);
+  mod = EEPROM.read(addr++);
+  col = EEPROM.read(addr++) << 16;
+  col += EEPROM.read(addr++) << 8;
+  col += EEPROM.read(addr++);
+  spe = EEPROM.read(addr++);
+  whi = EEPROM.read(addr++);
+  Serial.printf("READ pos %d VAL mod=%d col=0x%0X spe=%d whi=%d\n", pos, mod, col, spe, whi);
+
+}
 void handleModes() {
   if (server.method() == HTTP_POST) {
     Serial.println("Modes METHOD POST");
-    Serial.println("speeds ");
-    getMod(1);
-    getMod(2);
+
+    saveMode(1);
+    saveMode(2);
+    saveMode(3);
+    saveMode(4);
+    EEPROM.commit();
+
+    readMode(1);
     server.send(200, "text/plain", "OK");
     return;
   }
