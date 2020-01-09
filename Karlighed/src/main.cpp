@@ -5,22 +5,16 @@
 #include <EEPROM.h>
 #include "index.h"
 
-// App,    Wmos, descriptuin, ArduinoPin
-// Color1, D3	IO, 10k Pull-up	GPIO0
-// Button, D4	IO, 10k Pull-up, BUILTIN_LED	GPIO2
-// Color2, D5	IO, SCK	GPIO14
-
-// White led: D2, GPIO_4
-// Neo LED: D7, GPIO 13
-
-// Ota
-
 unsigned long blinkInterval = 1000;
 unsigned long lastBlinkTime = 0;
 
-#define BUTTON1 D5 // Pull up
-#define BUTTON2 D8 // Pull down
-#define WHITE_LED D2
+#define BUTTON1 D3 // GPIO0 hardware pullup
+#define BUTTON_ONOFF D2 // GPIO4
+#define WHITE_LED D6
+
+// Pull up button, grounded when "ON"
+#define BUTTON_ON 0
+#define BUTTON_OFF 1
 
 // Which pin on the Arduino is connected to the NeoPixels?
 // On a Trinket or Gemma we suggest changing this to 1:
@@ -35,7 +29,8 @@ void rainbow(int wait);
 void oneColor(int rgb);
 void handleRoot();
 void handleModes();
-void readMode(int mode);
+void setPos(int newPos);
+ICACHE_RAM_ATTR void handleInterrupt();
 
 ESPWebConfig espConfig;
 ESP8266WebServer server(80);
@@ -44,15 +39,22 @@ int mod = 0;
 unsigned col = 0;
 int spe = 0;
 int whi = 0;
+int onoff = -1;
+int pos;
+volatile bool modePressed = false;
+bool modePressHandled = false;
 
 void setup() {
-  Serial.begin(115200);
+  Serial.begin(74880);
   while(!Serial) {
     delay(1);
   }
+  pinMode(BUTTON1, INPUT);
+  pinMode(BUTTON_ONOFF, INPUT_PULLUP);
+
   pinMode(WHITE_LED, OUTPUT);
-  pinMode(BUTTON1, INPUT_PULLUP);
-  pinMode(BUTTON2, INPUT_PULLDOWN_16);
+  pinMode(LED_BUILTIN, OUTPUT);
+  digitalWrite(LED_BUILTIN, HIGH); // TURN OFF LED
 
   strip.begin();           // INITIALIZE NeoPixel strip object (REQUIRED)
   strip.show();            // Turn OFF all pixels ASAP
@@ -103,29 +105,71 @@ void setup() {
   Serial.println(WiFi.macAddress());
 
   EEPROM.begin(512);
-  readMode(1);
+  setPos(-1);
 
   server.on("/", handleRoot);
   server.on("/modes", handleModes);
   server.begin();
+
+  attachInterrupt(digitalPinToInterrupt(BUTTON1), handleInterrupt, FALLING);
 }
 
 void loop() {
-  unsigned long now = millis();
+  delay(10);
   ArduinoOTA.handle();
   if (ota) return;
 
+  // Only change setting if it is on.
+  if (onoff == BUTTON_ON && modePressed && !modePressHandled) {
+    modePressHandled = true;
+    if (pos >= 4) setPos(1);
+    else setPos(++pos);
+    delay(100);
+  }
+
+  if (modePressHandled && digitalRead(BUTTON1)) {
+    delay(200); // Debounce time
+    if (digitalRead(BUTTON1)) { // Button released
+      modePressed = false;
+      modePressHandled = false;
+    }
+  }
+
   server.handleClient();
 
-  if (now - lastBlinkTime < blinkInterval) return;
+  unsigned long now = millis();
+  if (!modePressed && now - lastBlinkTime < blinkInterval) return;
   lastBlinkTime = now;
-  Serial.printf("now %lu B1:%d B2:%d \n", now, digitalRead(BUTTON1), digitalRead(BUTTON2));
 
-  analogWrite(D2,whi);
+  int tmp = digitalRead(BUTTON_ONOFF);
+  if (tmp != onoff) {
+    // Value changhed
+    onoff = tmp;
+    if (onoff == BUTTON_OFF)
+    {
+      // TODO: Move up above blink interval (button response)
+      // TODO: Set interrupt wake up and start sleep.
+      whi = 0;
+      col = 0;
+    }
+    else setPos(-1);
+  }
+
+  Serial.printf("now %lu BUTTON_ONOFF:%d Pos: %d col:%X whi:%d\n", now, tmp, pos, col, whi);
+
+  if (whi == 100) {
+    digitalWrite(WHITE_LED, HIGH);
+  } else {
+    analogWrite(WHITE_LED,whi*10); // esp8266 has analogWrite 0-1023
+  }
 
 //  rainbow(10);             // Flowing rainbow cycle along the whole strip
   oneColor(col);
 
+}
+
+void handleInterrupt() {
+  modePressed = true;
 }
 
 void oneColor(int rgb) {
@@ -158,6 +202,7 @@ void rainbow(int wait) {
 
 void handleRoot() {
   // String page = indexPage;
+  // TODO: Use send_P
   server.send(200, "text/html", indexPage);
 }
 
@@ -172,6 +217,7 @@ void saveMode(int pos) {
   int val = valStr.toInt();
   Serial.printf("%s %d %s %d\n", key, addr, valStr.c_str(), val);
   EEPROM.write(addr++, val);
+  yield();
 
   // Color, 3 bytes
   memcpy(key, "col", 3); // Do not copy nullterminator
@@ -183,27 +229,44 @@ void saveMode(int pos) {
   Serial.printf("%s %d %s %d %0X\n", key, addr, valStr.c_str(), val, val);
   // Serial.printf("COL 0x%X %u\n", col, col);
   EEPROM.write(addr++, val>>16);
+  yield();
   EEPROM.write(addr++, (val>>8)&0xFF);
+  yield();
   EEPROM.write(addr++, val&0xFF);
+  yield();
 
   memcpy(key, "spe", 3); // Do not copy null terminator
   valStr = server.arg(key);
   val = valStr.toInt();
   Serial.printf("%s %d %s %d\n", key, addr, valStr.c_str(), val);
   EEPROM.write(addr++, val);
+  yield();
 
   memcpy(key, "whi", 3); // Do not copy null terminator
   valStr = server.arg(key);
   val = valStr.toInt();
   Serial.printf("%s %d %s %d\n", key, addr, valStr.c_str(), val);
   EEPROM.write(addr++, val);
+  yield();
 }
 
-void readMode(int pos) {
+void setPos(int newPos) {
   // Read parameters from eeprom.
   // If mode <= 0, read which mode to use from flash
-  if (pos <= 0) {
-    // TODO
+  // If mode is not zero, srite mode to flash
+  Serial.printf("setPos %d\n", pos);
+  if (newPos > 4) return;
+  if (newPos <= 0) {
+    pos = EEPROM.read(399);
+    if (pos <= 0 || pos > 4) {
+      Serial.printf("sBad pos %d, sewt to 1\n", pos);
+      pos = 1;
+    }
+  } else {
+    Serial.printf("Write %d\n", newPos);
+    EEPROM.write(399, newPos);
+    EEPROM.commit();
+    pos = newPos;
   }
   int addr = 400 + 10 * (pos - 1);
   mod = EEPROM.read(addr++);
@@ -212,9 +275,37 @@ void readMode(int pos) {
   col += EEPROM.read(addr++);
   spe = EEPROM.read(addr++);
   whi = EEPROM.read(addr++);
-  Serial.printf("READ pos %d VAL mod=%d col=0x%0X spe=%d whi=%d\n", pos, mod, col, spe, whi);
+  Serial.printf("setPos %d VAL mod=%d col=0x%0X spe=%d whi=%d\n", pos, mod, col, spe, whi);
 
 }
+
+void getModeJson(int pos, char *json, int len) {
+  /*
+  {"mod1":1,"col1":"#ffffff","spe1":255,"whi1":100,
+   "mod1":1,"col1":"#ffffff","spe1":255,"whi1":100,
+   "mod1":1,"col1":"#ffffff","spe1":255,"whi1":100,
+   "mod1":1,"col1":"#ffffff","spe1":255,"whi1":100}
+   */
+  // Every setting is max 49 bytes long
+  int val, wrt;
+  char *jj=json;
+
+  int addr = 400 + 10 * (pos - 1);
+  val = EEPROM.read(addr++);
+  wrt = sprintf(jj, "%s\"mod%d\":%d,",(pos==1)?"{":"",pos,val);
+  jj+= wrt;
+  val = EEPROM.read(addr++) << 16;
+  val += EEPROM.read(addr++) << 8;
+  val += EEPROM.read(addr++);
+  wrt = sprintf(jj, "\"col%d\":\"#%x\",",pos,val);
+  jj+= wrt;
+  val = EEPROM.read(addr++);
+  wrt = sprintf(jj, "\"spe%d\":%d,",pos,val);
+  jj+= wrt;
+  val = EEPROM.read(addr++);
+  wrt = sprintf(jj, "\"whi%d\":%d%c",pos,val,(pos==4)?'}':',');
+}
+
 void handleModes() {
   if (server.method() == HTTP_POST) {
     Serial.println("Modes METHOD POST");
@@ -225,11 +316,20 @@ void handleModes() {
     saveMode(4);
     EEPROM.commit();
 
-    readMode(1);
     server.send(200, "text/plain", "OK");
     return;
   }
-  // Get 
-  Serial.printf("Modes METHOD GET");
-  server.send(200, "application/json", "{\"spe1\":33, \"col2\":\"#0000AA\", \"mod1\":1, \"mod2\":2, \"mod3\":3, \"mod4\":4}");
+  else
+  {
+    char buff[50];
+    Serial.println("Modes METHOD GET");
+    server.setContentLength(CONTENT_LENGTH_UNKNOWN);
+    server.send(200, "application/json", "");
+    for (int i = 1;i<=4;i++) {
+      getModeJson(i, buff, 50);
+      server.sendContent(buff);
+    }
+    // Closing bracket generated in getModeJson
+    server.sendContent(""); // Terminate the HTTP chunked transmission with a 0-length chunk
+  }
 }
