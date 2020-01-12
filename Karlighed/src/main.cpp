@@ -5,7 +5,7 @@
 #include <EEPROM.h>
 #include "index.h"
 
-unsigned long blinkInterval = 1000;
+unsigned long blinkInterval = 100;
 unsigned long lastBlinkTime = 0;
 
 #define BUTTON1 D3 // GPIO0 hardware pullup
@@ -25,8 +25,9 @@ unsigned long lastBlinkTime = 0;
 #define LED_COUNT 8
 
 Adafruit_NeoPixel strip(LED_COUNT, NEO_LED_PIN, NEO_GRB + NEO_KHZ800);
-void rainbow(int wait);
-void oneColor(int rgb);
+void oneColor();
+void flow();
+void rainbow();
 void handleRoot();
 void handleModes();
 void setPos(int newPos);
@@ -41,6 +42,8 @@ int spe = 0;
 int whi = 0;
 int onoff = -1;
 int pos;
+int flowVal = 0; // Used for color changing modes
+
 volatile bool modePressed = false;
 bool modePressHandled = false;
 
@@ -58,7 +61,7 @@ void setup() {
 
   strip.begin();           // INITIALIZE NeoPixel strip object (REQUIRED)
   strip.show();            // Turn OFF all pixels ASAP
-  strip.setBrightness(150); // Set BRIGHTNESS (max = 255)
+  strip.setBrightness(255); // Set BRIGHTNESS (max = 255)
 
   espConfig.setup();
 
@@ -128,6 +131,7 @@ void loop() {
   }
 
   if (modePressHandled && digitalRead(BUTTON1)) {
+    Serial.printf("BUTTON1! \n");
     delay(200); // Debounce time
     if (digitalRead(BUTTON1)) { // Button released
       modePressed = false;
@@ -138,11 +142,10 @@ void loop() {
   server.handleClient();
 
   unsigned long now = millis();
-  if (!modePressed && now - lastBlinkTime < blinkInterval) return;
-  lastBlinkTime = now;
 
   int tmp = digitalRead(BUTTON_ONOFF);
   if (tmp != onoff) {
+    Serial.printf("BUTTON_ONOFF %d\n", tmp);
     // Value changhed
     onoff = tmp;
     if (onoff == BUTTON_OFF)
@@ -155,7 +158,10 @@ void loop() {
     else setPos(-1);
   }
 
-  Serial.printf("now %lu BUTTON_ONOFF:%d Pos: %d col:%X whi:%d\n", now, tmp, pos, col, whi);
+  if (!modePressed && now - lastBlinkTime < blinkInterval) return;
+  lastBlinkTime = now;
+
+  // Serial.printf("now %lu BUTTON_ONOFF:%d Pos:%d col:0x%X whi:%d mod:%d\n", now, tmp, pos, col, whi, mod);
 
   if (whi == 100) {
     digitalWrite(WHITE_LED, HIGH);
@@ -164,7 +170,19 @@ void loop() {
   }
 
 //  rainbow(10);             // Flowing rainbow cycle along the whole strip
-  oneColor(col);
+switch (mod)
+{
+case 2:
+  flow();
+  break;
+case 3:
+  rainbow();
+  break;
+
+default:
+  oneColor();
+  break;
+}
 
 }
 
@@ -172,32 +190,70 @@ void handleInterrupt() {
   modePressed = true;
 }
 
-void oneColor(int rgb) {
-  strip.fill(rgb, 0, 8);
+void oneColor() {
+  strip.fill(col, 0, 8);
   strip.show(); // Update strip with new contents
 }
 
-void rainbow(int wait) {
-  // Hue of first pixel runs 5 complete loops through the color wheel.
-  // Color wheel has a range of 65536 but it's OK if we roll over, so
-  // just count from 0 to 5*65536. Adding 256 to firstPixelHue each time
-  // means we'll make 5*65536/256 = 1280 passes through this outer loop:
-  for(long firstPixelHue = 0; firstPixelHue < 5*65536; firstPixelHue += 256) {
-    for(int i=0; i<strip.numPixels(); i++) { // For each pixel in strip...
-      // Offset pixel hue by an amount to make one full revolution of the
-      // color wheel (range of 65536) along the length of the strip
-      // (strip.numPixels() steps):
-      int pixelHue = firstPixelHue + (i * 65536L / strip.numPixels());
-      // strip.ColorHSV() can take 1 or 3 arguments: a hue (0 to 65535) or
-      // optionally add saturation and value (brightness) (each 0 to 255).
-      // Here we're using just the single-argument hue variant. The result
-      // is passed through strip.gamma32() to provide 'truer' colors
-      // before assigning to each pixel:
-      strip.setPixelColor(i, strip.gamma32(strip.ColorHSV(pixelHue)));
-    }
-    strip.show(); // Update strip with new contents
-    delay(wait);  // Pause for a moment
+void rainbow() {
+  // speed = 10; Go through all colors in 10 sec
+  // called every 100 ms (blinkTime).
+  // 10 sec = blinkTime * blinks => 100 blinks
+  long blinks = spe * (1000/blinkInterval);
+
+  if (flowVal >= 65536) flowVal = 0;
+  else flowVal += 65536/blinks;
+
+  Serial.printf("rainbow %d\n", flowVal);
+
+  strip.fill(strip.gamma32(strip.ColorHSV(flowVal)), 0, 8);
+  strip.show(); // Update strip with new contents
+
+}
+
+void flow() {
+  // Speed:
+  // blinkTime == 100, speed 10*1000: 100 blinks per flow-loop, skip flowVal 3 to complete round in 10 sec
+  // blinkTime == 100, speed 30*1000: 300 blinks per flow-loop, skip flowVal 1 to complete round in 30 sec
+  // Over 30 not supported
+  long blinks = spe * (1000/blinkInterval);
+  int skip = 300/blinks;
+  if (skip < 1) skip = 1;
+
+  // Slightly shift color. Use RGB representation
+  int r = col>>16;
+  int g = (col>>8) & 0xFF;
+  int b = col & 0xFF;
+
+  // flowVal 0 - 300. 100: change R. 100-200, Change G. 200-300 change B
+  if (flowVal >= 300) flowVal = 0;
+  int diff = 2 * flowVal%100; // 0..100..0
+  if (diff > 50) diff = 100 - diff;
+  int select = flowVal/100; // 0-2
+  switch (select)
+  {
+  case 0:
+    if (r < 105) r += diff;
+    else r -= diff;
+    break;
+  case 1:
+    if (g < 105) g += diff;
+    else g -= diff;
+    break;
+  case 2:
+    if (b < 105) b += diff;
+    else b -= diff;
+    break;
+  default:
+    break;
   }
+  flowVal += skip;
+
+  Serial.printf("flow %d %d, %X %X %X\n", diff, select, r, g, b);
+
+  strip.fill(strip.Color(r, g, b), 0, 8);
+  strip.show(); // Update strip with new contents
+
 }
 
 void handleRoot() {
@@ -276,7 +332,7 @@ void setPos(int newPos) {
   spe = EEPROM.read(addr++);
   whi = EEPROM.read(addr++);
   Serial.printf("setPos %d VAL mod=%d col=0x%0X spe=%d whi=%d\n", pos, mod, col, spe, whi);
-
+  if (spe <= 0) spe = 1;
 }
 
 void getModeJson(int pos, char *json, int len) {
