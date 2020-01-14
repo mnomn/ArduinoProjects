@@ -25,11 +25,12 @@ unsigned long lastBlinkTime = 0;
 #define LED_COUNT 8
 
 Adafruit_NeoPixel strip(LED_COUNT, NEO_LED_PIN, NEO_GRB + NEO_KHZ800);
-void oneColor();
+void oneColor(int rgb);
 void flow();
 void rainbow();
 void handleRoot();
 void handleModes();
+void handleSet();
 void setPos(int newPos);
 ICACHE_RAM_ATTR void handleInterrupt();
 
@@ -60,7 +61,8 @@ void setup() {
   digitalWrite(LED_BUILTIN, HIGH); // TURN OFF LED
 
   strip.begin();           // INITIALIZE NeoPixel strip object (REQUIRED)
-  strip.show();            // Turn OFF all pixels ASAP
+  oneColor(0);
+  digitalWrite(WHITE_LED, LOW);
   strip.setBrightness(255); // Set BRIGHTNESS (max = 255)
 
   espConfig.setup();
@@ -112,6 +114,7 @@ void setup() {
 
   server.on("/", handleRoot);
   server.on("/modes", handleModes);
+  server.on("/set", handleSet);
   server.begin();
 
   attachInterrupt(digitalPinToInterrupt(BUTTON1), handleInterrupt, FALLING);
@@ -154,6 +157,12 @@ void loop() {
       // TODO: Set interrupt wake up and start sleep.
       whi = 0;
       col = 0;
+      oneColor(0);
+      digitalWrite(WHITE_LED, LOW);
+      // gpio_pin_wakeup_enable(GPIO_ID_PIN(1), GPIO_PIN_INTR_LOLEVEL);
+      // wifi_set_sleep_type(LIGHT_SLEEP_T);
+      // delay(100);
+      return;
     }
     else setPos(-1);
   }
@@ -161,7 +170,11 @@ void loop() {
   if (!modePressed && now - lastBlinkTime < blinkInterval) return;
   lastBlinkTime = now;
 
-  // Serial.printf("now %lu BUTTON_ONOFF:%d Pos:%d col:0x%X whi:%d mod:%d\n", now, tmp, pos, col, whi, mod);
+  if (onoff == BUTTON_OFF) {
+    oneColor(0);
+    digitalWrite(WHITE_LED, LOW);
+    return;
+  }
 
   if (whi == 100) {
     digitalWrite(WHITE_LED, HIGH);
@@ -169,20 +182,19 @@ void loop() {
     analogWrite(WHITE_LED,whi*10); // esp8266 has analogWrite 0-1023
   }
 
-//  rainbow(10);             // Flowing rainbow cycle along the whole strip
-switch (mod)
-{
-case 2:
-  flow();
-  break;
-case 3:
-  rainbow();
-  break;
+  switch (mod)
+  {
+  case 2:
+    flow();
+    break;
+  case 3:
+    rainbow();
+    break;
 
-default:
-  oneColor();
-  break;
-}
+  default:
+    oneColor(col);
+    break;
+  }
 
 }
 
@@ -190,8 +202,8 @@ void handleInterrupt() {
   modePressed = true;
 }
 
-void oneColor() {
-  strip.fill(col, 0, 8);
+void oneColor(int rgb) {
+  strip.fill(rgb, 0, 8);
   strip.show(); // Update strip with new contents
 }
 
@@ -204,7 +216,7 @@ void rainbow() {
   if (flowVal >= 65536) flowVal = 0;
   else flowVal += 65536/blinks;
 
-  Serial.printf("rainbow %d\n", flowVal);
+  // Serial.printf("rainbow %d\n", flowVal);
 
   strip.fill(strip.gamma32(strip.ColorHSV(flowVal)), 0, 8);
   strip.show(); // Update strip with new contents
@@ -388,4 +400,23 @@ void handleModes() {
     // Closing bracket generated in getModeJson
     server.sendContent(""); // Terminate the HTTP chunked transmission with a 0-length chunk
   }
+}
+
+// handle /set?pos
+void handleSet() {
+  Serial.printf("/set method %d", server.method());
+  int res = 405;
+  if (server.method() == HTTP_POST) {
+    Serial.printf("/set method %d\n", server.method());
+    String val;
+    val = server.arg("pos");
+    int v = val.toInt();
+    if (1 <= v && v <=4) {
+      setPos(v);
+      res = 200;
+    } else {
+      res=400;
+    }
+  }
+  server.send(res, "text/plain", res==200?"OK":"?");
 }
