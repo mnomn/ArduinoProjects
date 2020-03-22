@@ -10,6 +10,8 @@
  * to ESP_192.168.X.Y and fill in wifi info and optionally user and
  * password. (Not sure how complicated/long the password can be)
  *
+ * To activate OTA: Plug in socket. Push button within 5 seconds. Led-blink will indicate ota.
+ *
  * After config the sonof listens to thgese urls:
  * - path: http://ip/switch get the value
  *         http://ip/switch?set=1 (POST) turn on power
@@ -19,17 +21,17 @@
 
 #include "Arduino.h"
 #include <ESPWebConfig.h> // https://github.com/mnomn/ESPWebConfig
+#include <ArduinoOTA.h>
 
 /*
 Sonoff WIFI Smart Switch:
-Arduino serttings: Generic esp8266, 1 M flash, 64 K SPIFFS
+Arduino serttings: Generic esp8266, File size 1MB (fs: none, OTA: 502KB)
 
 Relay: GPIO 12
 Button: GPIO 0
 Led: GPIO 13
 */
 ESP8266WebServer server(80);
-int buttonPin = 0;
 
 char *user = NULL;
 char *pass = NULL;
@@ -38,8 +40,11 @@ const char* PASS_KEY = "Pass:";
 String parameters[] = {USER_KEY, PASS_KEY};
 ESPWebConfig espConfig("configpass", parameters, 2);
 
+const int buttonPin = 0;
 const int relayPin = 12;
+const int ledPin = 13;
 unsigned long lastButtonTime = 0;
+int otaEnabled = 0;
 
 void handleRoot() {
   server.send(200, "text/html", F("<html><head><meta name=\"viewport\" content=\"width=device-width, initial-scale=1\">"
@@ -108,14 +113,17 @@ void handleSwitch() {
 }
 
 void setup() {
+  int configOk = 0;
   Serial.begin(115200);
   while(!Serial) {
     delay(1);
   }
   // espWebConfig is configuring the button as input
   pinMode(relayPin, OUTPUT);
+  pinMode(ledPin, OUTPUT);
   Serial.println("Starting ...");
-  if (!espConfig.setup()) {
+  configOk = espConfig.setup();
+  if (!configOk) {
     Serial.println("Config failed");
   }
 
@@ -127,21 +135,62 @@ void setup() {
   server.on ("/", handleRoot);
   server.on ("/switch", handleSwitch);
 
-
   server.begin();
-  /* Perhaps the internal pull up is not needed/bad?.
-     Since there probbaly is an external pull up. */
-  pinMode(buttonPin, INPUT_PULLUP);
+  pinMode(buttonPin, INPUT); // Pin must have pullup on board
+
+  // Wait for ota
+  int otaWait = 50;
+  int pressed = 0;
+  while (configOk && !otaEnabled && (otaWait--) > 0) {
+    delay(100);// 100 * 50 ms = 5 sec
+    int but = digitalRead(buttonPin);
+    Serial.print("OTA button ");
+    Serial.println(but);
+    if (but == LOW) {
+      digitalWrite(ledPin, !digitalRead(ledPin));
+      Serial.println("OTA Pressed");
+      pressed = 1;
+      continue; // Don't do anything until button released
+    }
+
+    if(!pressed) continue;
+
+    // Button pressed and released
+    otaEnabled = 1;
+
+    ArduinoOTA.onStart([]() {
+      Serial.println("Start updating");
+    });
+    ArduinoOTA.onEnd([]() {
+      Serial.println("\nEnd");
+    });
+    ArduinoOTA.onProgress([](unsigned int progress, unsigned int total) {
+      Serial.printf("Progress: %u%%\r", (progress / (total / 100)));
+    });
+    ArduinoOTA.onError([](ota_error_t error) {
+      Serial.printf("Error[%u]: ", error);
+    });
+    ArduinoOTA.begin();
+  }
+  Serial.print("OTA Enabled ");
+  Serial.println(otaEnabled);
+  Serial.println(WiFi.localIP());
+  // Turn off green led
+  digitalWrite(ledPin, 1);
 }
 
 void loop() {
+  if (otaEnabled) {
+    digitalWrite(ledPin, (millis()>>8)%2);
+    ArduinoOTA.handle();
+    return;
+  }
   // Check reset, 5 sec long press
   static long resetCounter = 5*1000;
   if (LOW == digitalRead(buttonPin))
   {
     if (resetCounter == (5*1000 - 100)) {// Toggle after 100 ms to avoid bounce
       Serial.println("Pressed, toggle");
-      Serial.println(WiFi.localIP());
       digitalWrite(relayPin, !digitalRead(relayPin));
     }
 
