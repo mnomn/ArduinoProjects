@@ -1,7 +1,11 @@
+// Using web-bluetooth. Works on some browsers an OS.
+// https://webbluetoothcg.github.io/web-bluetooth/
+
 const serviceUuid = "19b10020-e8f2-537e-4f6c-d104768a1214";
-let ctrlCharacteristic;
-let notifyCharacteristic;
-let myBLE;
+
+let bluetoothDevice
+let ctrlCharacteristic2;
+let notifyCharacteristic2;
 
 let buttonValue = 0;
 const h = 300;
@@ -10,21 +14,30 @@ const offset = 15;
 const offsetR = 40;
 
 sendInProgress = false;
-let inp
+let serviceInput
+
+let connectDisconnectButton
+const connectStr = "Connect and drive"
+const disconnectStr = "Disconnect"
+
+// TODO: Show on screen if connected or not
+// TODO: Listen to disconnect
+// TODO: Is notify channel needed?
+// TODO: Switch between touch and gyro.
 
 function setup() {
   createCanvas(h, w);
   background("#366");
-  myBLE = new p5ble();
 
-  inp = createInput(serviceUuid);
-  inp.position(15,315);
-  inp.size(225, 20)
-//    inp.input(myInputEvent);
-  // Create a 'Connect and Start Notifications' button
-  const connectButton = createButton('Connect and Drive')
-  connectButton.mousePressed(connectAndStartNotify);
-  connectButton.position(15,345);
+  serviceInput = createInput(serviceUuid);
+  serviceInput.position(15,315);
+  serviceInput.size(235, 20)
+
+  connectDisconnectButton = createButton()
+  connectDisconnectButton.mousePressed(connectBle);
+  connectDisconnectButton.position(15,345);
+  connectDisconnectButton.html(connectStr)
+  connectDisconnectButton.style('background-color', "#BBBBBB");
 
   let x = w/2
   let y = h/14
@@ -66,6 +79,7 @@ function setup() {
 
   // Center
   ellipse(h/2, w/2, 20, 20)
+
 }
 
 function draw() {
@@ -75,60 +89,58 @@ function draw() {
   }
 }
 
-function connectAndStartNotify() {
-  // Connect to a device by passing the service UUID
-  let v = inp.value()
-  myBLE.connect(v, gotCharacteristics);
+function connectBle() {
+  let vv = connectDisconnectButton.html();
+  if (vv == disconnectStr) {
+    disconnectBle();
+    return;
+  }
+
+  let serviceName = serviceInput.value()
+
+  navigator.bluetooth.requestDevice({
+  filters: [{
+    services: [serviceName]
+  }]
+})
+.then(
+  device => {
+    bluetoothDevice = device;
+    return device.gatt.connect();
+  }
+)
+.then(
+  // TODO: If i filter on "name: "BLECare", how do I get serviceName here?
+  server => server.getPrimaryService(serviceName)
+)
+.then(service => service.getCharacteristics())
+.then(characteristics => {
+  characteristics.forEach(characteristic => {
+    console.log(characteristic.properties.write);
+    if (characteristic.properties.write) {
+      // Save char so we can write to it later
+      ctrlCharacteristic2 = characteristic
+    }
+  })
+  connectDisconnectButton.html(disconnectStr);
+  connectDisconnectButton.style('background-color', "#8888BB");
+})
+.catch(
+  error => { console.log(error); });
 }
 
-// A function that will be called once got characteristics
-function gotCharacteristics(error, characteristics) {
-  if (!characteristics || error) {
-    console.log("Char undefined, error: " , error)
-    return
+function disconnectBle() {
+  if (!bluetoothDevice) {
+    return;
   }
-
-  ctrlCharacteristic = null
-  notifyCharacteristic = null
-  for(let i=0; i<characteristics.length;i++) {
-    // Expecting two 
-    let ch = characteristics[i]
-    if (ch.properties.write) {
-      if (ctrlCharacteristic != null){
-        alert("Oops, more than one writable characteristic.")
-        return;
-      }
-      ctrlCharacteristic = ch;
-    }
-    if (ch.properties.notify) {
-      if (notifyCharacteristic != null){
-        alert("Oops, more than one notify characteristic.")
-        return;
-      }
-      notifyCharacteristic = ch;
-
-      // No use for notifications right now
-      // myBLE.read(notifyCharacteristic, gotValue);
-    }
-    console.log("c " , i)
-    console.log(characteristics[i].uuid)
+  log('Disconnecting from Bluetooth Device...');
+  if (bluetoothDevice.gatt.connected) {
+    bluetoothDevice.gatt.disconnect();
+    connectDisconnectButton.html(connectStr)
+    connectDisconnectButton.style('background-color', "#BBBBBB");
+  } else {
+    log('> Bluetooth Device is already disconnected');
   }
-  if (notifyCharacteristic == null) {
-    alert("Oops, no notify characteristic found.")
-  }
-  if (ctrlCharacteristic == null) {
-    alert("Oops, no writable characteristic found.")
-  }
-}
-
-function gotValue(error, value) {
-  if (error) {
-    console.log('error: ', error);
-    return
-  }
-  console.log('value: ', value);
-  // After getting a value, call p5ble.read() again to get the value again
-  myBLE.read(notifyCharacteristic, gotValue);
 }
 
 function normalizeSteer(v,range) {
@@ -160,23 +172,20 @@ function writeSteerSpeed(st, sp) {
   spN = normalizeSpeed(sp, 127)
   stN = normalizeSteer(st,127)
   console.log(`Sending steer:${stN} speed:${spN}`);
-  if (!ctrlCharacteristic) {
-    console.log("Not connected");
-    return
-  }
 
-  // The examples use the method myBLE.write(ctrlCharacteristic, someData)
-  // but I was not able to send more that one byte.
-  // The undocumented function charactereistcs.writeValue(data) worked great.  
-  let arr = new Uint8Array([spN,stN])
-  if (ctrlCharacteristic) {
+  if (ctrlCharacteristic2) {
+    let arr = new Uint8Array([spN,stN])
     sendInProgress = true;
-    ctrlCharacteristic.writeValue(arr).then(()=>{
-      console.log("Send done!")
+    ctrlCharacteristic2.writeValue(arr)
+    .then(()=>{
+      console.log("Send2 done!")
       sendInProgress = false;
     }, ()=> {
-      console.log("Send ERR")
+      console.log("Send2 ERR")
       sendInProgress = false;
     })
+  } else {
+    console.log("Not connected")
+
   }
 }
