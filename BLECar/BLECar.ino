@@ -9,13 +9,12 @@
 
 //const int ledPin = LED_BUILTIN; // set ledPin to on-board LED
 
-const int fwPin = LED_BUILTIN; // A0
-const int revPin = A1;
+const int fwPin = LED_BUILTIN;//A0;
+const int revPin = LED_PWR;//A1;
 const int leftPin = A2;
-const int rightPin = LED_PWR;
+const int rightPin = A7;
 
-//const int powerLedPin = LED_PWR;
-//const int buttonPin = 4; // set buttonPin to digital pin 4
+#define ZERO_VAL 63 // 127/2;
 
 BLEService carService("19B10020-E8F2-537E-4F6C-D104768A1214");
 
@@ -24,6 +23,8 @@ BLEByteCharacteristic notify("19B10022-E8F2-537E-4F6C-D104768A1214", BLERead | B
 
 unsigned long nextNotify = 0L;
 byte dbg = 0;
+// Stop if no data in channel
+unsigned long lastWright = 0L;
 
 void setup() {
   Serial.begin(9600);
@@ -34,11 +35,6 @@ void setup() {
   pinMode(leftPin, OUTPUT);
   pinMode(rightPin, OUTPUT);
 
-//  pinMode(powerLedPin, OUTPUT);
-//  pinMode(ledPin, OUTPUT); // use the LED as an output
-//  pinMode(buttonPin, INPUT); // use button pin as an input
-
-  // begin initialization
   if (!BLE.begin()) {
     Serial.println("starting BLE failed!");
     while (1);
@@ -49,14 +45,11 @@ void setup() {
   // set the UUID for the service this peripheral advertises:
   BLE.setAdvertisedService(carService);
 
-  // add the characteristics to the service
   carService.addCharacteristic(ctrl);
   carService.addCharacteristic(notify);
 
-  // add the service
   BLE.addService(carService);
 
-  // start advertising
   BLE.advertise();
 
   Serial.println("Bluetooth device active, waiting for connections...");
@@ -71,84 +64,67 @@ void setup() {
 void Speed(int spee)
 {
   spee = spee - 127/2;
-//  Serial.print("Speed ");
   Serial.print(spee);
   Serial.print(" ");
 
-  static int prevSpeed = 0;
-  // Write less often to pins. Detect different signs
-  if (prevSpeed * spee <= 0)
-  {
-    if (spee > 0) {
-      // Speed is 0-62, analogWrite is 0 - 255. Multiply by 4.
-      digitalWrite(revPin, LOW);
-    }
-    else {
-      digitalWrite(fwPin, LOW);
-    }
-  }
-  prevSpeed = spee;
-
-  // Speed is 0-62, analogWrite is 0 - 255. Multiply by 4.
+  // Speed is -63:64, analogWrite is 0 - 255. Multiply by 4.
 
   if (spee > 0)
   {
-    digitalWrite(revPin, LOW);
+    if (spee>255) spee = 255;
+    analogWrite(revPin, 0);
     analogWrite(fwPin, spee*4);
   }
   else
   {
-    digitalWrite(fwPin, LOW);
-    analogWrite(revPin, -4*spee);
+    spee *=-4;
+    if (spee>255) spee = 255;
+    analogWrite(fwPin, 0);
+    analogWrite(revPin, spee);
   }
 }
 
 void Steer(int steer)
 {
   steer = steer - 127/2;
-//  Serial.print("Steer: ");
   Serial.println(steer);
 
-  // Speed is 0-62, analogWrite is 0 - 255. Multiply by 4.
+  // Steer is -63:64, analogWrite is 0 - 255. Multiply by 4.
   // Neg: Left, Pos: Right
-#if 0
-  static int prevSteer = 0;
-  // Write less often to pins. Detect different signs
-  if (prevSteer * steer <= 0)
-  {
-    if (steer > 0) {
-      digitalWrite(leftPin, LOW);
-    }
-    else {
-      digitalWrite(rightPin, LOW);
-    }
-  }
-  prevSteer = steer;
-#endif
 
-#if 1
   if (steer > 0)
   {
-    digitalWrite(leftPin, LOW);
+    if (steer>255) steer = 255;
+    analogWrite(leftPin, 0);
     analogWrite(rightPin, 4*steer);
   }
   else
   {
-    digitalWrite(rightPin, LOW);
-    analogWrite(leftPin, -4*steer);
+    steer *=-4;
+    if (steer>255) steer = 255;
+    analogWrite(rightPin, 0);
+    analogWrite(leftPin, steer);
   }
-#endif
 }
-
 
 void loop() {
   BLE.poll();
 
   unsigned long ms = millis();
 
+  // Stop if no data written. Dead mans grip.
+  if(lastWright) {
+    unsigned long silentTime = ms - lastWright;
+    if (silentTime > 500) {
+      Serial.print("STOP ");
+      Speed(ZERO_VAL);
+      Steer(ZERO_VAL);
+      lastWright = 0;
+    }
+  }
+
   byte b_period = 100; // ms
   byte b_duty = 15; // x^2 - 1
-//  digitalWrite(powerLedPin, ((ms/100)&b_duty)==b_duty);
   if (ms > nextNotify) {
     nextNotify = nextNotify + 5000L;
     dbg++;
@@ -156,33 +132,21 @@ void loop() {
     Serial.print("Notify");
     Serial.println(dbg);
     notify.writeValue(dbg);
-
-    Serial.print("PINS D1 ");
-    Serial.println(1);
-    Serial.print("PINS A1 ");
-    Serial.println(A1);
-//    Serial.print("PINS LED ");
-//    Serial.println(LED_BUILTIN);
-//    Serial.print("PINS LED_PWR ");
-//    Serial.println(LED_PWR);
   }
 
   if (ctrl.written())
   {
+    lastWright = ms;
     // ctrl Characteristic is unsigned inte, but it is devided into 4 bytes
     // [speed, steer, notUsed, notUsed]
+    // To avoid sign issues, only 0 to 127 is used.
     byte data[4];
 
     ctrl.readValue(data, 4);
     
+    Serial.print(">");
     Speed(data[0]);
     Steer(data[1]);
-    Serial.print(".");
 
-  }
-  else
-  {
-//    int mm = millis()/100;
-  //  analogWrite(LED_BUILTIN, mm & 0xFF);
   }
 }
