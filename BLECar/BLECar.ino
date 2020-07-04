@@ -7,12 +7,10 @@
 
 #include <ArduinoBLE.h>
 
-//const int ledPin = LED_BUILTIN; // set ledPin to on-board LED
-
-const int fwPin = LED_BUILTIN;//A0;
-const int revPin = LED_PWR;//A1;
-const int leftPin = A2;
-const int rightPin = A7;
+const int fwPin = 3;// LED_BUILTIN;
+const int revPin = 2;//LED_PWR;
+const int leftPin = 5;
+const int rightPin = 4;
 
 #define ZERO_VAL 63 // 127/2;
 
@@ -127,8 +125,10 @@ void loop() {
   byte b_duty = 15; // x^2 - 1
   if (ms > nextNotify) {
     nextNotify = nextNotify + 5000L;
+
     dbg++;
     if (dbg>200)dbg=0;
+
     Serial.print("Notify");
     Serial.println(dbg);
     notify.writeValue(dbg);
@@ -137,7 +137,7 @@ void loop() {
   if (ctrl.written())
   {
     lastWright = ms;
-    // ctrl Characteristic is unsigned inte, but it is devided into 4 bytes
+    // ctrl Characteristic is unsigned int, but it is devided into 4 bytes
     // [speed, steer, notUsed, notUsed]
     // To avoid sign issues, only 0 to 127 is used.
     byte data[4];
