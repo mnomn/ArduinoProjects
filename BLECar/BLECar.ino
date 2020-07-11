@@ -12,7 +12,7 @@ const int revPin = 2;//LED_PWR;
 const int leftPin = 5;
 const int rightPin = 4;
 
-#define ZERO_VAL 63 // 127/2;
+#define  63 // 127/2;
 
 BLEService carService("19B10020-E8F2-537E-4F6C-D104768A1214");
 
@@ -53,10 +53,10 @@ void setup() {
   Serial.println("Bluetooth device active, waiting for connections...");
 }
 
-/*  speed is a char (0:127)
- *  "Cast it to signed: speed -63:64
- *  Positives are written to fw pin.
- *  Negative are written to rev pin.
+/*  spee is a char (0:127)
+ *  "Cast" it to signed: speed -63:64
+ *  Positives are written to fwPin.
+ *  Negative are written to revPin.
  *
 */
 void Speed(int spee)
@@ -108,11 +108,11 @@ void Steer(int steer)
 void loop() {
   BLE.poll();
 
-  unsigned long ms = millis();
+  unsigned long now = millis();
 
   // Stop if no data written. Dead mans grip.
   if(lastWright) {
-    unsigned long silentTime = ms - lastWright;
+    unsigned long silentTime = now - lastWright;
     if (silentTime > 500) {
       Serial.print("STOP ");
       Speed(ZERO_VAL);
@@ -121,9 +121,7 @@ void loop() {
     }
   }
 
-  byte b_period = 100; // ms
-  byte b_duty = 15; // x^2 - 1
-  if (ms > nextNotify) {
+  if (now > nextNotify) {
     nextNotify = nextNotify + 5000L;
 
     dbg++;
@@ -136,7 +134,7 @@ void loop() {
 
   if (ctrl.written())
   {
-    lastWright = ms;
+    lastWright = now;
     // ctrl Characteristic is unsigned int, but it is devided into 4 bytes
     // [speed, steer, notUsed, notUsed]
     // To avoid sign issues, only 0 to 127 is used.
@@ -147,6 +145,5 @@ void loop() {
     Serial.print(">");
     Speed(data[0]);
     Steer(data[1]);
-
   }
 }
