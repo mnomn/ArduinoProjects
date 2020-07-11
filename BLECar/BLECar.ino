@@ -12,7 +12,7 @@ const int revPin = 2;//LED_PWR;
 const int leftPin = 5;
 const int rightPin = 4;
 
-#define  63 // 127/2;
+#define ZERO_VAL 63 // 127/2;
 
 BLEService carService("19B10020-E8F2-537E-4F6C-D104768A1214");
 
