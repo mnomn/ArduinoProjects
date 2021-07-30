@@ -1,17 +1,16 @@
 #include <Arduino.h>
-#include <dhtnew.h>
 #include <ESPWebConfig.h> // https://github.com/mnomn/ESPWebConfig
 #include <ESPXtra.h> // https://github.com/mnomn/ESPXtra
 
-// #include <Adafruit_Sensor.h>
-// #include <DHT.h>
+#include <Adafruit_Sensor.h>
+#include <DHT.h>
 
-// #define DHTPIN 2
-// #define DHTTYPE DHT11
+#define DHTPIN 2
+#define DHTTYPE DHT11
 
-// DHT dht(DHTPIN, DHTTYPE);
+#define MEASURE_INTERRVAL_MIN 5
 
-DHTNEW mySensor(2);
+DHT dht(DHTPIN, DHTTYPE);
 
 char *postUrl = NULL;
 const char *POST_HOST_KEY = "Post to:";
@@ -25,23 +24,7 @@ void setup() {
   Serial.begin(9600);
   delay(200);
   #endif
-  // dht.begin();
-
-  delay(3000);
-  XTRA_PRINTLN("Starting!\n");
-
-  delay(3000);
-  XTRA_PRINTLN("Starting2!\n");
-
-  delay(3000);
-  XTRA_PRINTLN("Starting3!\n");
-
-  delay(3000);
-  XTRA_PRINTLN("Starting4 X!");
-  Serial.println("Starting4!\n");
-
-  // mySensor.setHumOffset(10);
-  // mySensor.setTempOffset(-3.5);
+  dht.begin();
 
   bool setupOk = espConfig.setup();
   XTRA_PRINTF("Setup %d", setupOk);
@@ -50,7 +33,6 @@ void setup() {
 int getDHT11Values(float *temp, float *hum);
 
 void loop() {
-
   int bb = espx.ButtonPressed(0, LED_BUILTIN);
   if (bb != 0)
   {
@@ -64,7 +46,7 @@ void loop() {
     return;
   }
 
-  if (!espx.TimeToWork(60000)) return;
+  if (!espx.TimeToWork(MEASURE_INTERRVAL_MIN * 60 * 1000)) return;
 
   float temp;
   float hum;
@@ -76,32 +58,29 @@ void loop() {
   XTRA_PRINTF("Post to URL %s\n", postHost);
 
   snprintf(json, sizeof(json), "{\"t\":%.1f,\"h\":%.1f,\"err\":%d}",temp, hum, err_code);
+  digitalWrite(LED_BUILTIN, HIGH);
   espx.PostJsonString(postHost, NULL, json);
-  
-  delay(3000);
+  delay(300);
+  digitalWrite(LED_BUILTIN, LOW);
 }
 
-
+// Return -1 on error, else number of retries (0 - 2)
 int getDHT11Values(float *temp, float *hum)
 {
+  int retries = 0;
+  const int max_retries = 2;
+  while(1)
+  {
+    *hum = dht.readHumidity();
+    *temp = dht.readTemperature();
 
-  // *hum = dht.readHumidity();
-  // *temp = dht.readTemperature();
+    // Return tries to log eventual retries needed
+    if (!isnan(*hum) && !isnan(*temp)) return retries;
 
-  // XTRA_PRINT(F("TEST DHT sensor!"));
+    // Return -1 to indicate error
+    if (retries >= max_retries) return -1;
 
-  // if (isnan(*hum) || isnan(*temp)) {
-  //   XTRA_PRINT(F("Failed to read from DHT sensor!"));
-  //   *hum=0;
-  //   *temp=0;
-
-  //   return -1;
-  // }
-
-  int read_code = mySensor.read();
-  *hum = mySensor.getHumidity();
-  *temp = mySensor.getTemperature();
-  XTRA_PRINTF("DTH11 %d H:%f T: %f\n", read_code, *hum, *temp);
-
-  return read_code;
+    retries++;
+    delay(100);
+  }
 }
