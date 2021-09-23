@@ -14,6 +14,10 @@ extern "C" {
 #include <Adafruit_BMP280.h>
 #elif AM2320_ENABLE
 #include <AM232X.h>
+#elif DALLAS_T
+# define ONE_WIRE_BUS 0 // Use pin that already has a pull up
+#include <OneWire.h>
+#include <DallasTemperature.h>
 #endif
 
 #ifdef OTA_ENABLED
@@ -62,6 +66,17 @@ bool serviceMode = 0; // Config or ota
   int getAM2320Values(float *t,float *hum);
   #define initSensor() {am2320.begin();}
   #define getSensorValues(t,x) getAM2320Values(t,x)
+#elif DALLAS_T
+  OneWire oneWire(ONE_WIRE_BUS);
+  DallasTemperature sensors(&oneWire);
+  #define initSensor() {sensors.begin();}
+  int getDS18B20Values(float *t,float *x);
+  #define getSensorValues(t,x) getDS18B20Values(t,x)
+#else // Dummy mode
+  #define GET_DUMMY
+  int getDummyValues(float *t,float *hum);
+  #define initSensor() {;}
+  #define getSensorValues(t,x) getDummyValues(t,x)
 #endif
 
 int wakeupReason = 0;
@@ -127,17 +142,9 @@ void loop()
   }
 
   // Short press: Nothing
-  // Medium press: Reset config
+  // Medium press: Configure
   // Long press: Go to OTA
-  int buttonMode = 0;
-  while (1)
-  {
-    delay(20);
-    int pressed = espx.ButtonPressed(buttonPin, LED_BUILTIN);
-    if (!pressed)
-      break;
-    buttonMode = pressed;
-  }
+  int buttonMode = espx.ButtonPressed(buttonPin, LED_BUILTIN);
 
   Serial.printf("PRESSED %d\n", buttonMode);
   if (buttonMode == ESPXtra::ButtonLong)
@@ -149,12 +156,11 @@ void loop()
   }
   else if (buttonMode == ESPXtra::ButtonMedium)
   {
-    XTRA_PRINTLN("Clear config");
-    espConfig.clearConfig();
+    XTRA_PRINTLN("Start config");
+    espConfig.startConfig(10);
     serviceMode = 1;
     return;
   }
-
 
   digitalWrite(LED_BUILTIN, LOW);
 
@@ -170,7 +176,11 @@ void loop()
 
   XTRA_PRINTF("Post to URL %s\n", postHost);
 
+#ifdef DALLAS_T
+  snprintf(json, sizeof(json), "{\"t\":%.1f,\"boot\":%d,\"vcc\":%d,\"err\":%d}",temp, wakeupReason, vcc, err_code);
+#else
   snprintf(json, sizeof(json), "{\"t\":%.1f,\"v2\":%d,\"vcc\":%d,\"err\":%d}",temp, (int)v2, vcc, (err_code?err_code:wakeupReason));
+#endif
   espx.PostJsonString(postHost, NULL, json);
 
   espx.SleepSetMinutes(15);
@@ -276,6 +286,33 @@ int getAM2320Values(float *t,float *hum)
   return 0;
 }
 #endif
+
+#ifdef DALLAS_T
+int getDS18B20Values(float *t, float *x)
+{
+  *x = 0;
+
+  sensors.requestTemperatures(); // Send the command to get temperatures
+  float tempC = sensors.getTempCByIndex(0);
+  if (tempC != DEVICE_DISCONNECTED_C) {
+    *t = tempC;
+    return 0;
+  }
+
+  // oh no
+  *t = 0;
+  return 0xD; // D for disconnected
+}
+#endif
+
+#ifdef GET_DUMMY
+int getDummyValues(float *t,float *hum)
+{
+  *t = 22.2;
+  *hum = 55.5;
+  return 0;
+}
+#endif // GET_DUMMY
 
 #ifdef OTA_ENABLED
 void otaSetup()
