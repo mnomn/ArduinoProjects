@@ -157,7 +157,7 @@ void loop()
   else if (buttonMode == ESPXtra::ButtonMedium)
   {
     XTRA_PRINTLN("Start config");
-    espConfig.startConfig(10);
+    espConfig.startConfig(120000);
     serviceMode = 1;
     return;
   }
