@@ -181,7 +181,7 @@ void loop()
 #else
   snprintf(json, sizeof(json), "{\"t\":%.1f,\"v2\":%d,\"vcc\":%d,\"err\":%d}",temp, (int)v2, vcc, (err_code?err_code:wakeupReason));
 #endif
-  espx.PostJsonString(postHost, NULL, json);
+  espx.PostJsonString(postHost, json);
 
   espx.SleepSetMinutes(15);
 }
