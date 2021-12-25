@@ -26,7 +26,9 @@ extern "C" {
 
 #include <ESP8266WiFi.h>
 
+#ifdef USE_INERNAL_VCC
 ADC_MODE(ADC_VCC); // to use getVcc
+#endif
 
 ESPXtra espx;
 
@@ -164,7 +166,12 @@ void loop()
 
   digitalWrite(LED_BUILTIN, LOW);
 
-  int vcc = ESP.getVcc();
+#ifdef USE_INERNAL_VCC
+  int volt = ESP.getVcc();
+#else
+  int volt = analogRead(A0); /* Read the Analog Input value */
+#endif
+
   float temp = 0;
   float v2 = 0; // Humidity or preassure
   int err_code = 0;
@@ -177,9 +184,9 @@ void loop()
   XTRA_PRINTF("Post to URL %s\n", postHost);
 
 #ifdef DALLAS_T
-  snprintf(json, sizeof(json), "{\"t\":%.1f,\"boot\":%d,\"vcc\":%d,\"err\":%d}",temp, wakeupReason, vcc, err_code);
+  snprintf(json, sizeof(json), "{\"t\":%.1f,\"boot\":%d,\"volt\":%d,\"err\":%d}",temp, wakeupReason, volt, err_code);
 #else
-  snprintf(json, sizeof(json), "{\"t\":%.1f,\"v2\":%d,\"vcc\":%d,\"err\":%d}",temp, (int)v2, vcc, (err_code?err_code:wakeupReason));
+  snprintf(json, sizeof(json), "{\"t\":%.1f,\"v2\":%d,\"volt\":%d,\"err\":%d}",temp, (int)v2, volt, (err_code?err_code:wakeupReason));
 #endif
   espx.PostJsonString(postHost, json);
 
