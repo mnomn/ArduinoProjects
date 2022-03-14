@@ -82,12 +82,19 @@ bool serviceMode = 0; // Config or ota
 #endif
 
 int wakeupReason = 0;
-bool ota = false;
 
-char *postUrl = NULL;
+String postHost;
 const char *POST_HOST_KEY = "Post to:";
 String parameters[] = {POST_HOST_KEY};
 ESPWebConfig espConfig(NULL, parameters, 1);
+
+#ifndef MONITOR_SPEED
+#define MONITOR_SPEED 74880
+#endif
+
+#define DEEP_SLEEP_TIME_M 15
+
+#define MAX_UPTIME_M 30UL
 
 /*
  WemosD1/GPIO5 SCL
@@ -95,10 +102,31 @@ ESPWebConfig espConfig(NULL, parameters, 1);
  WemosD3/GOPI0 Button pin
  WemosD5/GPIO14
 */
+
+// In some cases the system hang somewhere and does not go too sleep.
+// This interrupt will forc it to go to sleep after a certain amount of time
+void IRAM_ATTR onTimerISR(){
+  // Blink every X sec to se that circuit is running
+  int val = GPIP(LED_BUILTIN);
+  if(!val) GPOS = (1 << LED_BUILTIN);
+  else GPOC = (1 << LED_BUILTIN);
+
+  if (millis() > MAX_UPTIME_M * 60UL * 1000UL) {
+    ESP.deepSleep(DEEP_SLEEP_TIME_M * 60UL * 1000000UL, WAKE_RF_DEFAULT);
+  }
+}
+
 void setup() {
+  // Timer to reboot fail-safe after X sec
+  timer1_attachInterrupt(onTimerISR);
+  timer1_enable(TIM_DIV256, TIM_EDGE, TIM_LOOP);
+  // 80 MHz/TIM_DIV256, 80000000/256=312500
+  // 1 sec = 312500, 10 sec = 3125000
+  timer1_write(3125000);
+
 #ifdef XTRA_DEBUG
-  Serial.begin(74880);
-  while(!Serial) {
+  Serial.begin(MONITOR_SPEED);
+  while(!Serial && millis() < 2000) {
     delay(1);
   }
   delay(200);
@@ -122,13 +150,27 @@ void setup() {
 
   if(!espConfig.setup())
   {
-    espx.SleepSetMinutes(15);
+    espx.SleepSetMinutes(DEEP_SLEEP_TIME_M);
   }
 
   wakeupReason = myResetInfo->reason;
 
   XTRA_PRINT("Connected, IP address: ");
   XTRA_PRINTLN(WiFi.localIP());
+
+  char* tmp = espConfig.getParameter(POST_HOST_KEY);
+  if (tmp) {
+    if (strstr(tmp, "://") == NULL) {
+      postHost = String("http://");
+      postHost = postHost + tmp;
+    }
+    else {
+      postHost = String(tmp);
+    }
+  }
+
+  XTRA_PRINT("POST HOST ");
+  XTRA_PRINTLN(postHost?postHost.c_str():"NULL");
 
   otaSetup();
 }
@@ -148,7 +190,7 @@ void loop()
   // Long press: Go to OTA
   int buttonMode = espx.ButtonPressed(buttonPin, LED_BUILTIN);
 
-  Serial.printf("PRESSED %d\n", buttonMode);
+  XTRA_PRINTF("PRESSED %d\n", buttonMode);
   if (buttonMode == ESPXtra::ButtonLong)
   {
     XTRA_PRINTLN("Start OTA");
@@ -178,10 +220,15 @@ void loop()
 
   err_code = getSensorValues(&temp, &v2);
 
-  char *postHost = espConfig.getParameter(POST_HOST_KEY);
+  if (!postHost) {
+    XTRA_PRINTLN("POST HOST IS NULL!!!");
+    delay(5000);
+    return;
+  }
+
   char json[64];
 
-  XTRA_PRINTF("Post to URL %s\n", postHost);
+  XTRA_PRINTF("Post to URL %s\n", postHost.c_str());
 
 #ifdef DALLAS_T
   snprintf(json, sizeof(json), "{\"t\":%.1f,\"boot\":%d,\"volt\":%d,\"err\":%d}",temp, wakeupReason, volt, err_code);
@@ -190,7 +237,7 @@ void loop()
 #endif
   espx.PostJsonString(postHost, json);
 
-  espx.SleepSetMinutes(15);
+  espx.SleepSetMinutes(DEEP_SLEEP_TIME_M);
 }
 
 #ifdef BMP280_ENABLE
@@ -315,8 +362,9 @@ int getDS18B20Values(float *t, float *x)
 #ifdef GET_DUMMY
 int getDummyValues(float *t,float *hum)
 {
+  XTRA_PRINTLN("Get dummy values");
   *t = 22.2;
-  *hum = 55.5;
+  *hum = 56;
   return 0;
 }
 #endif // GET_DUMMY
@@ -324,9 +372,7 @@ int getDummyValues(float *t,float *hum)
 #ifdef OTA_ENABLED
 void otaSetup()
 {
-
-  XTRA_PRINTLN2("Configure OTA");
-  ota=true;
+  XTRA_PRINTLN("otaSetup");
 
   ArduinoOTA.onStart([]() {
     // server.stop();
@@ -347,7 +393,7 @@ void otaSetup()
     XTRA_PRINTF("Progress: %u%%\r", (progress / (total / 100)));
   });
   ArduinoOTA.onError([](ota_error_t error) {
-    Serial.printf("Error[%u]: ", error);
+    XTRA_PRINTF("Error[%u]: ", error);
     if (error == OTA_AUTH_ERROR) {
       XTRA_PRINTLN("Auth Failed");
     } else if (error == OTA_BEGIN_ERROR) {
