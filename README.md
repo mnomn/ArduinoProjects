@@ -5,17 +5,13 @@ Various arduino projects
 ### PsychadeLights
 Psychadelic three color led strip controller [PsychadeLights](PsychadeLights)
 
-### IFTTTButton
+### ESP8266Button
 
-A sketch for ESP8266 that sends a message to IFTTT WebHooks when a button is pressed [IFTTTButton](IFTTTButton)
+A sketch for ESP8266 that sends a message to a host when a button is pressed [ESP8266Button](ESP8266Button)
 
 ### SuperSimpleSwitch
 
 A simple esp8266 based switch, for example the Sonoff wifi switch [SuperSimpleSwitch](SuperSimpleSwitch)
-
-### OhmOnline
-
-Measure voltage over some unknown resistors and send it to a URL. [OhmOnline](OhmOnline)
 
 ### Solstickan
 
