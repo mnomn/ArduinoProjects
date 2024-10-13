@@ -18,21 +18,22 @@ Led: GPIO 13
 */
 ESP8266WebServer server(80);
 
-char *user = NULL;
-char *pass = NULL;
+const char *user = NULL;
+const char *pass = NULL;
 const char* USER_KEY = "User:";
 const char* PASS_KEY = "Pass:";
-String parameters[] = {USER_KEY, PASS_KEY};
-ESPWebConfig espConfig("configpass", parameters, 2);
+ESPWebConfig espConfig("configpass",
+                       "Basic Auth to call switch api",
+                       {USER_KEY, PASS_KEY});
 ESPXtra espx;
 
 unsigned long lastButtonTime = 0;
 int otaEnabled = 0;
 
-#define ESP01 1
+// #define ESP01 1
 
 const int buttonPin = 0;
-#define LED_ON HIGH
+#define LED_ON LOW
 
 # ifdef ESP01
 const int relayPin = 3; // RX pin on ESP 01
@@ -42,6 +43,7 @@ const int relayPin = 12;
 const int ledPin = 13;
 #endif
 
+// #define SSS_DEBUG 1
 
 #ifdef SSS_DEBUG
 #define SSS_PRINT(x) (Serial.print(x))
@@ -130,6 +132,9 @@ void setup() {
   pinMode(relayPin, OUTPUT);
   pinMode(ledPin, OUTPUT);
   SSS_PRINTLN("Starting ...");
+  // During setup, turn on green led
+  digitalWrite(ledPin, LED_ON);
+
   configOk = espConfig.setup();
   if (!configOk) {
     SSS_PRINTLN("Config failed");
@@ -176,16 +181,17 @@ void setup() {
       Serial.printf("Progress: %u%%\r", (progress / (total / 100)));
     });
     ArduinoOTA.onError([](ota_error_t error) {
-      SSS_PRINT("Error:")
-      SSS_PRINTLN(error)
+      SSS_PRINT("Error:");
+      SSS_PRINTLN(error);
     });
     ArduinoOTA.begin();
   }
   SSS_PRINT("OTA Enabled ");
   SSS_PRINTLN(otaEnabled);
   SSS_PRINTLN(WiFi.localIP());
-  // Turn off green led
-  digitalWrite(ledPin, 1);
+
+  // Setup done, turn off green led
+  digitalWrite(ledPin, !LED_ON);
 }
 
 void loop() {
@@ -198,7 +204,7 @@ void loop() {
   if (LOW == digitalRead(buttonPin))
   {
     SSS_PRINTLN("Pressed, toggle");
-    // Togel directly, while button is pressed.
+    // Toggle directly, while button is pressed.
     digitalWrite(relayPin, !digitalRead(relayPin));
 
     int buttonMode = espx.ButtonPressed(buttonPin, ledPin);
